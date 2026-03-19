@@ -1,0 +1,139 @@
+import Foundation
+import os
+
+/// Queued actor that processes transcription jobs one at a time.
+/// Pipeline: ASR -> Diarize -> Merge -> Compress (ALAC) -> Write to DB
+actor TranscriptionPipeline {
+
+    private let logger = Logger(subsystem: "com.caddie.app", category: "TranscriptionPipeline")
+
+    private let asrEngine = ASREngine()
+    private let diarizationEngine = DiarizationEngine()
+
+    private var queue: [(meetingId: String, database: AppDatabase?)] = []
+    private var isProcessing = false
+
+    /// Enqueues a meeting for transcription processing.
+    func enqueue(meetingId: String, database: AppDatabase? = nil) {
+        queue.append((meetingId, database))
+        logger.info("Enqueued meeting \(meetingId) for transcription (queue depth: \(self.queue.count))")
+
+        if !isProcessing {
+            Task { await processNext() }
+        }
+    }
+
+    // MARK: - Private
+
+    private func processNext() async {
+        guard !isProcessing, !queue.isEmpty else { return }
+
+        isProcessing = true
+        let job = queue.removeFirst()
+        let meetingId = job.meetingId
+        let database = job.database
+
+        logger.info("Starting transcription pipeline for meeting \(meetingId)")
+        let startTime = CFAbsoluteTimeGetCurrent()
+
+        // Update status to transcribing
+        await updateMeetingStatus(meetingId: meetingId, status: .transcribing, database: database)
+
+        do {
+            let wavURL = AudioFileManager.wavPath(for: meetingId)
+
+            // Step 1: ASR
+            logger.info("[\(meetingId)] Running ASR...")
+            let (asrSegments, language, duration) = try await asrEngine.transcribe(audioURL: wavURL)
+            logger.info("[\(meetingId)] ASR complete: \(asrSegments.count) segments, language=\(language)")
+
+            // Step 2: Diarization
+            logger.info("[\(meetingId)] Running diarization...")
+            let speakerSegments = try await diarizationEngine.diarize(audioURL: wavURL)
+            logger.info("[\(meetingId)] Diarization complete: \(speakerSegments.count) speaker segments")
+
+            // Step 3: Merge
+            let merged = TranscriptMerger.merge(asr: asrSegments, speakers: speakerSegments)
+            let fullText = TranscriptMerger.generateFullText(segments: merged)
+            let uniqueSpeakers = Set(merged.map(\.speaker)).count
+
+            let processingTime = CFAbsoluteTimeGetCurrent() - startTime
+            let transcript = Transcript(
+                language: language,
+                duration: duration,
+                numSegments: merged.count,
+                numSpeakers: uniqueSpeakers,
+                processingTimeSeconds: processingTime,
+                fullText: fullText,
+                segments: merged
+            )
+
+            logger.info("[\(meetingId)] Transcript merged: \(transcript.numSegments) segments, \(transcript.numSpeakers) speakers")
+
+            // Step 4: Write transcript JSON to DB
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let transcriptJSON = try encoder.encode(transcript)
+            let transcriptString = String(data: transcriptJSON, encoding: .utf8)
+
+            if let db = database {
+                try await db.dbWriter.write { dbConn in
+                    try dbConn.execute(
+                        sql: "UPDATE meetings SET transcript = ? WHERE meeting_id = ?",
+                        arguments: [transcriptString, meetingId]
+                    )
+                }
+            }
+
+            // Step 5: Compress WAV to ALAC
+            logger.info("[\(meetingId)] Compressing to ALAC...")
+            let alacURL = AudioFileManager.alacPath(for: meetingId)
+            try AudioFileManager.compressToALAC(wavURL: wavURL, outputURL: alacURL)
+            logger.info("[\(meetingId)] ALAC compression complete")
+
+            // Step 6: Update status to done
+            await updateMeetingStatus(meetingId: meetingId, status: .done, database: database)
+
+            logger.info("[\(meetingId)] Pipeline complete in \(String(format: "%.1f", processingTime))s")
+
+        } catch {
+            let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+            logger.error("[\(meetingId)] Pipeline failed after \(String(format: "%.1f", elapsed))s: \(error.localizedDescription)")
+
+            // Update status to error with message
+            if let db = database {
+                do {
+                    try await db.dbWriter.write { dbConn in
+                        try dbConn.execute(
+                            sql: "UPDATE meetings SET status = ?, error = ? WHERE meeting_id = ?",
+                            arguments: [MeetingStatus.error.rawValue, error.localizedDescription, meetingId]
+                        )
+                    }
+                } catch {
+                    logger.error("[\(meetingId)] Failed to write error status to DB: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        isProcessing = false
+
+        // Process next in queue
+        if !queue.isEmpty {
+            await processNext()
+        }
+    }
+
+    private func updateMeetingStatus(meetingId: String, status: MeetingStatus, database: AppDatabase?) async {
+        guard let db = database else { return }
+        do {
+            try await db.dbWriter.write { dbConn in
+                try dbConn.execute(
+                    sql: "UPDATE meetings SET status = ? WHERE meeting_id = ?",
+                    arguments: [status.rawValue, meetingId]
+                )
+            }
+        } catch {
+            logger.error("[\(meetingId)] Failed to update status to \(status.rawValue): \(error.localizedDescription)")
+        }
+    }
+}
