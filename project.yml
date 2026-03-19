@@ -38,8 +38,11 @@ targets:
     platform: macOS
     sources:
       - Sources
+      - path: Resources/Assets.xcassets
     resources:
-      - Resources
+      - path: Resources
+        excludes:
+          - "Assets.xcassets"
     dependencies:
       - package: GRDB
       - package: SimplyCoreAudio
