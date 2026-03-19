@@ -4,41 +4,37 @@ struct TranscriptView: View {
     let segments: [TranscriptSegment]
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
-                    segmentRow(segment: segment, index: index)
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                let isNewSpeaker = index == 0 || segments[index - 1].speaker != segment.speaker
+
+                if isNewSpeaker && index > 0 {
+                    Divider().padding(.vertical, 10)
+                }
+
+                if isNewSpeaker {
+                    HStack(spacing: 8) {
+                        SpeakerBadge(speaker: segment.speaker)
+                        Text(Formatters.timestamp(seconds: segment.start))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.bottom, 4)
+                }
+
+                HStack(alignment: .top, spacing: 8) {
+                    if !isNewSpeaker {
+                        Text(Formatters.timestamp(seconds: segment.start))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.quaternary)
+                            .frame(width: 36, alignment: .trailing)
+                    }
+
+                    Text(segment.text)
+                        .textSelection(.enabled)
+                        .lineSpacing(4)
                 }
             }
-            .padding(.vertical, 4)
-        }
-    }
-
-    @ViewBuilder
-    private func segmentRow(segment: TranscriptSegment, index: Int) -> some View {
-        let showSpeaker = index == 0 || segments[index - 1].speaker != segment.speaker
-
-        HStack(alignment: .top, spacing: 8) {
-            // Speaker label column
-            Group {
-                if showSpeaker {
-                    SpeakerBadge(speaker: segment.speaker)
-                } else {
-                    Text("")
-                }
-            }
-            .frame(width: 90, alignment: .trailing)
-
-            // Timestamp
-            Text(Formatters.timestamp(seconds: segment.start))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
-                .frame(width: 40, alignment: .trailing)
-
-            // Text content
-            Text(segment.text)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

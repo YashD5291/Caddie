@@ -16,29 +16,34 @@ struct AudioPlayerView: View {
 
     var body: some View {
         if fileExists {
-            VStack(spacing: 8) {
-                HStack(spacing: 12) {
-                    Button {
-                        togglePlayback()
-                    } label: {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title3)
+            VStack(spacing: 12) {
+                Slider(value: $currentTime, in: 0...max(duration, 1)) { editing in
+                    if !editing { player?.currentTime = currentTime }
+                }
+                .controlSize(.small)
+
+                HStack(spacing: 16) {
+                    Button { togglePlayback() } label: {
+                        Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.system(size: 28))
+                            .symbolRenderingMode(.hierarchical)
                     }
                     .buttonStyle(.plain)
 
                     Text(Formatters.timestamp(seconds: currentTime))
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 40, alignment: .trailing)
+                        .font(.subheadline.monospacedDigit())
+                        .frame(width: 44, alignment: .trailing)
 
-                    Slider(value: $currentTime, in: 0...max(duration, 1)) { editing in
-                        if !editing {
-                            player?.currentTime = currentTime
-                        }
-                    }
+                    Text("/")
+                        .font(.subheadline)
+                        .foregroundStyle(.quaternary)
 
                     Text(Formatters.timestamp(seconds: duration))
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 40, alignment: .leading)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, alignment: .leading)
+
+                    Spacer()
 
                     Picker("Speed", selection: $playbackSpeed) {
                         ForEach(speeds, id: \.self) { speed in
@@ -52,18 +57,18 @@ struct AudioPlayerView: View {
                     }
                 }
             }
-            .padding()
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            .padding(16)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .onAppear { loadAudio() }
             .onDisappear { stopTimer(); player?.stop() }
         } else {
-            HStack {
-                Image(systemName: "waveform.slash")
-                    .foregroundStyle(.secondary)
-                Text("Audio file not found")
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
+            HStack(spacing: 8) {
+                Image(systemName: "waveform.slash").foregroundStyle(.tertiary)
+                Text("Audio file not found").foregroundStyle(.secondary).font(.subheadline)
             }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .onAppear {
                 fileExists = FileManager.default.fileExists(atPath: audioURL.path)
             }
@@ -73,29 +78,19 @@ struct AudioPlayerView: View {
     private func loadAudio() {
         fileExists = FileManager.default.fileExists(atPath: audioURL.path)
         guard fileExists else { return }
-
         do {
             let audioPlayer = try AVAudioPlayer(contentsOf: audioURL)
             audioPlayer.enableRate = true
             audioPlayer.prepareToPlay()
             duration = audioPlayer.duration
             player = audioPlayer
-        } catch {
-            fileExists = false
-        }
+        } catch { fileExists = false }
     }
 
     private func togglePlayback() {
         guard let player else { return }
-
-        if isPlaying {
-            player.pause()
-            stopTimer()
-        } else {
-            player.rate = playbackSpeed
-            player.play()
-            startTimer()
-        }
+        if isPlaying { player.pause(); stopTimer() }
+        else { player.rate = playbackSpeed; player.play(); startTimer() }
         isPlaying.toggle()
     }
 
@@ -103,15 +98,9 @@ struct AudioPlayerView: View {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             guard let player else { return }
             currentTime = player.currentTime
-            if !player.isPlaying && isPlaying {
-                isPlaying = false
-                stopTimer()
-            }
+            if !player.isPlaying && isPlaying { isPlaying = false; stopTimer() }
         }
     }
 
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
-    }
+    private func stopTimer() { timer?.invalidate(); timer = nil }
 }

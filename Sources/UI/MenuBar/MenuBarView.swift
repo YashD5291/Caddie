@@ -1,93 +1,114 @@
 import SwiftUI
+import GRDB
 
 struct MenuBarView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            statusSection
-            Divider()
-            actionsSection
+        statusSection
+        Divider()
+        recentMeetingsSection
+        Divider()
+        actionsSection
+        Divider()
+        Button {
+            NSApp.terminate(nil)
+        } label: {
+            Label("Quit Caddie", systemImage: "power")
         }
-        .frame(width: 240)
     }
 
-    // MARK: - Status Section
+    // MARK: - Status
 
     @ViewBuilder
     private var statusSection: some View {
         switch appState.status {
         case .idle:
-            Label("No active meeting", systemImage: "mic.slash")
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+            Text("No Active Meeting")
 
         case .recording:
-            HStack(spacing: 8) {
-                RecordingIndicator()
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(appState.currentMeetingTitle ?? "Recording...")
-                        .font(.caption.bold())
-                        .lineLimit(1)
-                    Text(Formatters.duration(seconds: Int(appState.recordingDuration)))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-
-            Button(role: .destructive) {
-                // Stop action wired in Task 11
+            Text("\u{1F534} \(appState.currentMeetingTitle ?? "Recording...")")
+            Text("Recording \u{00B7} \(Formatters.duration(seconds: Int(appState.recordingDuration)))")
+            Button {
+                confirmStopRecording()
             } label: {
                 Label("Stop Recording", systemImage: "stop.circle.fill")
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 4)
 
         case .transcribing:
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Transcribing...")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            Text("Transcribing...")
         }
     }
 
-    // MARK: - Actions Section
+    // MARK: - Recent Meetings
 
+    @ViewBuilder
+    private var recentMeetingsSection: some View {
+        let meetings = fetchRecentMeetings()
+        if !meetings.isEmpty {
+            Section("Recent") {
+                ForEach(meetings) { meeting in
+                    Button {
+                        openWindow(id: "main")
+                        NSApp.activate(ignoringOtherApps: true)
+                    } label: {
+                        Text(menuLabel(for: meeting))
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    @ViewBuilder
     private var actionsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                NSApp.activate(ignoringOtherApps: true)
-            } label: {
-                Label("Open Caddie", systemImage: "macwindow")
-            }
+        Button {
+            openWindow(id: "main")
+            NSApp.activate(ignoringOtherApps: true)
+        } label: {
+            Label("Open Caddie", systemImage: "macwindow")
+        }
 
-            Divider()
+        SettingsLink {
+            Label("Settings...", systemImage: "gear")
+        }
+    }
 
-            Button {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            } label: {
-                Label("Preferences...", systemImage: "gear")
-            }
+    // MARK: - Helpers
 
-            Button {
-                NSApp.terminate(nil)
-            } label: {
-                Label("Quit Caddie", systemImage: "power")
+    private func confirmStopRecording() {
+        let title = appState.currentMeetingTitle ?? "this meeting"
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            let alert = NSAlert()
+            alert.messageText = "Stop Recording?"
+            alert.informativeText = "This will stop recording '\(title)'."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Stop")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn {
+                appState.stopRecording()
             }
         }
     }
-}
 
-#Preview {
-    MenuBarView()
-        .environment(AppState())
+    private func fetchRecentMeetings() -> [Meeting] {
+        guard let db = appState.database else { return [] }
+        return (try? db.dbWriter.read { dbConn in
+            try Meeting
+                .order(Column("created_at").desc)
+                .limit(3)
+                .fetchAll(dbConn)
+        }) ?? []
+    }
+
+    private func menuLabel(for meeting: Meeting) -> String {
+        if let duration = meeting.durationSeconds {
+            return "\(meeting.title)  \(Formatters.duration(seconds: duration))"
+        } else {
+            return "\(meeting.title)  \(meeting.status.rawValue.capitalized)"
+        }
+    }
 }

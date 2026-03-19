@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct CaddieApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
 
     var body: some Scene {
@@ -9,41 +10,80 @@ struct CaddieApp: App {
             MenuBarView()
                 .environment(appState)
         } label: {
-            menuBarLabel
+            switch appState.status {
+            case .idle:
+                Image(systemName: "mic.badge.plus")
+                    .symbolRenderingMode(.monochrome)
+            case .recording:
+                Image(systemName: "record.circle.fill")
+                    .symbolRenderingMode(.monochrome)
+            case .transcribing:
+                Image(systemName: "waveform")
+                    .symbolRenderingMode(.monochrome)
+            }
         }
+        .menuBarExtraStyle(.menu)
 
-        WindowGroup {
+        Window("Caddie", id: "main") {
             ContentView()
                 .environment(appState)
-                .task {
-                    do {
-                        try appState.initialize()
-                    } catch {
-                        CaddieLogger.app.error("Failed to initialize AppState: \(error.localizedDescription)")
-                    }
-                }
         }
+        .defaultSize(width: 800, height: 600)
 
         Settings {
             SettingsView()
+                .environment(appState)
+        }
+    }
+}
+
+// MARK: - AppDelegate
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        CaddieLogger.app.info("Caddie launched")
+
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(windowDidBecomeKey(_:)),
+            name: NSWindow.didBecomeKeyNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(windowWillClose(_:)),
+            name: NSWindow.willCloseNotification, object: nil
+        )
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        CaddieLogger.app.info("Caddie terminating")
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    // MARK: - Dynamic Activation Policy
+
+    @objc private func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              isMainAppWindow(window) else { return }
+        NSApp.setActivationPolicy(.regular)
+    }
+
+    @objc private func windowWillClose(_ notification: Notification) {
+        DispatchQueue.main.async {
+            let hasVisibleMainWindow = NSApp.windows.contains {
+                $0.isVisible && self.isMainAppWindow($0)
+            }
+            if !hasVisibleMainWindow {
+                NSApp.setActivationPolicy(.accessory)
+            }
         }
     }
 
-    @ViewBuilder
-    private var menuBarLabel: some View {
-        switch appState.status {
-        case .idle:
-            Image(systemName: "mic.badge.plus")
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.primary)
-        case .recording:
-            Image(systemName: "record.circle.fill")
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.red)
-        case .transcribing:
-            Image(systemName: "waveform")
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.orange)
-        }
+    private func isMainAppWindow(_ window: NSWindow) -> Bool {
+        window.styleMask.contains(.titled)
+            && !window.className.contains("Settings")
+            && !window.className.contains("MenuBar")
+            && window.title.contains("Caddie")
     }
 }

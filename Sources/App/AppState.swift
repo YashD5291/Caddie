@@ -34,21 +34,62 @@ final class AppState {
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AppState")
 
+    var isInitialized = false
+    var initError: String?
+
     // MARK: - Lifecycle
 
-    func initialize() throws {
-        database = try AppDatabase()
-        try AudioFileManager.ensureDirectoryExists()
-
-        detector.onMeetingStarted = { [weak self] meeting in
-            self?.startRecording(meeting: meeting)
+    func initialize() {
+        guard !isInitialized else { return }
+        do {
+            database = try AppDatabase()
+            try AudioFileManager.ensureDirectoryExists()
+            detector.onMeetingStarted = { [weak self] meeting in
+                self?.startRecording(meeting: meeting)
+            }
+            detector.onMeetingEnded = { [weak self] in
+                self?.stopRecording()
+            }
+            detector.start()
+            isInitialized = true
+            logger.info("AppState initialized")
+        } catch {
+            initError = error.localizedDescription
+            logger.error("Failed to initialize: \(error.localizedDescription)")
         }
-        detector.onMeetingEnded = { [weak self] in
-            self?.stopRecording()
-        }
-        detector.start()
+    }
 
-        logger.info("AppState initialized")
+    func retryTranscription(meetingId: String) {
+        let wavURL = AudioFileManager.wavPath(for: meetingId)
+        guard FileManager.default.fileExists(atPath: wavURL.path) else {
+            if let db = database {
+                do {
+                    try db.dbWriter.write { dbConn in
+                        try dbConn.execute(
+                            sql: "UPDATE meetings SET status = ?, error = ? WHERE meeting_id = ?",
+                            arguments: [MeetingStatus.error.rawValue, "Audio file not found", meetingId]
+                        )
+                    }
+                } catch {
+                    logger.error("Failed to update meeting error: \(error.localizedDescription)")
+                }
+            }
+            return
+        }
+        if let db = database {
+            do {
+                try db.dbWriter.write { dbConn in
+                    try dbConn.execute(
+                        sql: "UPDATE meetings SET status = ?, error = NULL WHERE meeting_id = ?",
+                        arguments: [MeetingStatus.transcribing.rawValue, meetingId]
+                    )
+                }
+            } catch {
+                logger.error("Failed to update meeting for retry: \(error.localizedDescription)")
+            }
+        }
+        let db = database
+        Task { await pipeline.enqueue(meetingId: meetingId, database: db) }
     }
 
     func shutdown() {

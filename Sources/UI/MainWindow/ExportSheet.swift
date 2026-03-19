@@ -14,9 +14,7 @@ enum ExportFormatter {
             let number = index + 1
             let startTS = Formatters.srtTimestamp(seconds: segment.start)
             let endTS = Formatters.srtTimestamp(seconds: segment.end)
-            result += "\(number)\n"
-            result += "\(startTS) --> \(endTS)\n"
-            result += "[\(segment.speaker)] \(segment.text)\n\n"
+            result += "\(number)\n\(startTS) --> \(endTS)\n[\(segment.speaker)] \(segment.text)\n\n"
         }
         return result
     }
@@ -29,64 +27,62 @@ struct ExportSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("Export Transcript")
-                .font(.headline)
-
-            Text("Choose a format for \"\(meeting.title)\"")
+        VStack(spacing: 20) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 28, weight: .light))
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 12) {
-                Button("Export as TXT") {
-                    exportAs(format: .txt)
+            VStack(spacing: 6) {
+                Text("Export Transcript").font(.title3.bold())
+                Text(meeting.title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(spacing: 10) {
+                Button { exportAs(format: .txt) } label: {
+                    HStack { Image(systemName: "doc.text"); Text("Export as TXT") }.frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
 
-                Button("Export as SRT") {
-                    exportAs(format: .srt)
+                Button { exportAs(format: .srt) } label: {
+                    HStack { Image(systemName: "captions.bubble"); Text("Export as SRT") }.frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
             }
+            .frame(width: 220)
 
-            Button("Cancel") {
-                dismiss()
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            Button("Cancel", role: .cancel) { dismiss() }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .font(.subheadline)
         }
-        .padding(24)
-        .frame(minWidth: 300)
+        .padding(32)
+        .frame(minWidth: 320)
     }
 
-    private enum ExportFormat {
-        case txt, srt
-    }
+    private enum ExportFormat { case txt, srt }
 
     private func exportAs(format: ExportFormat) {
         guard let transcriptJSON = meeting.transcript,
               let data = transcriptJSON.data(using: .utf8),
-              let transcript = try? JSONDecoder().decode(Transcript.self, from: data) else {
-            return
-        }
+              let transcript = try? JSONDecoder().decode(Transcript.self, from: data) else { return }
 
         let content: String
         let fileExtension: String
-
         switch format {
-        case .txt:
-            content = ExportFormatter.toTXT(segments: transcript.segments)
-            fileExtension = "txt"
-        case .srt:
-            content = ExportFormatter.toSRT(segments: transcript.segments)
-            fileExtension = "srt"
+        case .txt: content = ExportFormatter.toTXT(segments: transcript.segments); fileExtension = "txt"
+        case .srt: content = ExportFormatter.toSRT(segments: transcript.segments); fileExtension = "srt"
         }
 
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "\(meeting.title).\(fileExtension)"
         panel.allowedContentTypes = [.plainText]
-
         guard panel.runModal() == .OK, let url = panel.url else { return }
-
         try? content.write(to: url, atomically: true, encoding: .utf8)
         dismiss()
     }

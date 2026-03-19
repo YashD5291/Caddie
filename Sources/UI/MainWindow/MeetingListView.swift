@@ -8,44 +8,58 @@ struct MeetingListView: View {
     var body: some View {
         List(selection: $selectedMeetingId) {
             if groupedMeetings.isEmpty {
-                ContentUnavailableView(
-                    "No meetings yet",
-                    systemImage: "mic.badge.plus",
-                    description: Text("Meetings will appear here once Caddie detects and records them.")
-                )
+                emptyState
             } else {
                 ForEach(groupedMeetings, id: \.date) { group in
-                    Section(header: Text(Formatters.dateLabel(from: group.date))) {
+                    Section {
                         ForEach(group.meetings) { meeting in
                             MeetingRow(meeting: meeting)
                                 .tag(meeting.id)
+                                .listRowSeparator(.hidden)
                         }
+                    } header: {
+                        Text(Formatters.dateLabel(from: group.date))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
         }
+        .listStyle(.sidebar)
         .searchable(text: $searchText, prompt: "Search meetings")
         .navigationTitle("Caddie")
     }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "waveform.badge.mic")
+                .font(.system(size: 36))
+                .foregroundStyle(.tertiary)
+            Text("No meetings yet")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Text("Meetings will appear here once Caddie detects and records them.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    // MARK: - Grouping
 
     private struct DateGroup {
         let date: String
         let meetings: [Meeting]
     }
 
-    private var filteredMeetings: [Meeting] {
-        if searchText.isEmpty {
-            return meetings
-        }
-        let query = searchText.lowercased()
-        return meetings.filter {
-            $0.title.lowercased().contains(query) ||
-            ($0.app?.lowercased().contains(query) ?? false)
-        }
-    }
-
     private var groupedMeetings: [DateGroup] {
-        let grouped = Dictionary(grouping: filteredMeetings) { $0.date }
+        let grouped = Dictionary(grouping: meetings) { $0.date }
         return grouped.keys.sorted(by: >).map { date in
             DateGroup(date: date, meetings: grouped[date]!.sorted { $0.startTime > $1.startTime })
         }
@@ -59,9 +73,17 @@ private struct MeetingRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(meeting.title)
-                .font(.body.bold())
-                .lineLimit(1)
+            HStack {
+                Text(meeting.title)
+                    .font(.body.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                if let time = Formatters.time(from: meeting.startTime) {
+                    Text(time)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
 
             HStack(spacing: 6) {
                 StatusDot(status: meeting.status)
@@ -73,15 +95,9 @@ private struct MeetingRow: View {
                 }
 
                 if let duration = meeting.durationSeconds {
-                    Text(Formatters.duration(seconds: duration))
+                    Text("\u{00B7} \(Formatters.duration(seconds: duration))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-
-                if let time = Formatters.time(from: meeting.startTime) {
-                    Text(time)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
                 }
             }
         }
