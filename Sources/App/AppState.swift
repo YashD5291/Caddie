@@ -27,9 +27,10 @@ final class AppState {
     // MARK: - Engines
 
     private(set) var database: AppDatabase?
+    private(set) var modelManager = ModelManager()
     private let detector = MeetingDetector()
     private let recorder = AudioRecorder()
-    private let pipeline = TranscriptionPipeline()
+    private var pipeline: TranscriptionPipeline?
     private var currentMeetingId: String?
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AppState")
@@ -39,11 +40,37 @@ final class AppState {
 
     // MARK: - Lifecycle
 
-    func initialize() {
+    func initialize() async {
         guard !isInitialized else { return }
         do {
             database = try AppDatabase()
             try AudioFileManager.ensureDirectoryExists()
+
+            // 1. Download models (FluidAudio handles caching — instant if already downloaded)
+            await modelManager.downloadModelsIfNeeded()
+
+            if let downloadError = modelManager.downloadError {
+                initError = "Model download failed: \(downloadError)"
+                logger.error("Model download failed: \(downloadError)")
+                return
+            }
+
+            // 2. Initialize ASR engine
+            let asrEngine = ASREngine()
+            if let asrModels = modelManager.asrModels {
+                try await asrEngine.initialize(models: asrModels)
+            }
+
+            // 3. Initialize diarization engine
+            let diarizationEngine = DiarizationEngine()
+            if let diarizer = modelManager.diarizer {
+                try await diarizationEngine.initialize(diarizer: diarizer)
+            }
+
+            // 4. Create pipeline with injected engines
+            pipeline = TranscriptionPipeline(asr: asrEngine, diarization: diarizationEngine)
+
+            // 5. Start detection
             detector.onMeetingStarted = { [weak self] meeting in
                 self?.startRecording(meeting: meeting)
             }
@@ -51,8 +78,9 @@ final class AppState {
                 self?.stopRecording()
             }
             detector.start()
+
             isInitialized = true
-            logger.info("AppState initialized")
+            logger.info("AppState initialized with ML pipeline")
         } catch {
             initError = error.localizedDescription
             logger.error("Failed to initialize: \(error.localizedDescription)")
@@ -87,6 +115,10 @@ final class AppState {
             } catch {
                 logger.error("Failed to update meeting for retry: \(error.localizedDescription)")
             }
+        }
+        guard let pipeline = pipeline else {
+            logger.error("Cannot retry transcription — pipeline not initialized")
+            return
         }
         let db = database
         Task { await pipeline.enqueue(meetingId: meetingId, database: db) }
@@ -172,6 +204,10 @@ final class AppState {
         status = .transcribing
         logger.info("Recording stopped for meeting \(meetingId), enqueuing transcription")
 
+        guard let pipeline = pipeline else {
+            logger.error("Cannot enqueue transcription — pipeline not initialized")
+            return
+        }
         let db = database
         Task { await pipeline.enqueue(meetingId: meetingId, database: db) }
 
