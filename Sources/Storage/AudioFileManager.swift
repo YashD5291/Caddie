@@ -124,6 +124,100 @@ enum AudioFileManager {
         return outputURL
     }
 
+    /// Creates a mono mixdown from a stereo WAV file.
+    /// Averages left and right channels: mono[i] = (left[i] + right[i]) / 2
+    /// Returns the URL of the temp mono WAV file. Caller must delete it when done.
+    static func createMonoMixdown(stereoURL: URL) throws -> URL {
+        var inputFile: ExtAudioFileRef?
+        var status = ExtAudioFileOpenURL(stereoURL as CFURL, &inputFile)
+        guard status == noErr, let input = inputFile else {
+            throw AudioError.failedToOpenInput(status)
+        }
+        defer { ExtAudioFileDispose(input) }
+
+        var inputFormat = AudioStreamBasicDescription()
+        var propertySize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        status = ExtAudioFileGetProperty(input, kExtAudioFileProperty_FileDataFormat, &propertySize, &inputFormat)
+        guard status == noErr else {
+            throw AudioError.failedToReadFormat(status)
+        }
+
+        let sampleRate = inputFormat.mSampleRate
+        let channelCount = inputFormat.mChannelsPerFrame
+        guard channelCount == 2 else {
+            return stereoURL
+        }
+
+        let monoURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("caddie_mono_\(UUID().uuidString).wav")
+
+        var monoFormat = AudioStreamBasicDescription(
+            mSampleRate: sampleRate,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 2,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 2,
+            mChannelsPerFrame: 1,
+            mBitsPerChannel: 16,
+            mReserved: 0
+        )
+
+        var outputFile: ExtAudioFileRef?
+        status = ExtAudioFileCreateWithURL(
+            monoURL as CFURL, kAudioFileWAVEType, &monoFormat, nil,
+            AudioFileFlags.eraseFile.rawValue, &outputFile
+        )
+        guard status == noErr, let output = outputFile else {
+            throw AudioError.failedToCreateOutput(status)
+        }
+        defer { ExtAudioFileDispose(output) }
+
+        let chunkFrames: UInt32 = 4096
+        let stereoBufferSize = Int(chunkFrames * 2)
+        let stereoBuffer = UnsafeMutablePointer<Int16>.allocate(capacity: stereoBufferSize)
+        defer { stereoBuffer.deallocate() }
+
+        let monoBuffer = UnsafeMutablePointer<Int16>.allocate(capacity: Int(chunkFrames))
+        defer { monoBuffer.deallocate() }
+
+        while true {
+            var frameCount = chunkFrames
+            var readList = AudioBufferList(
+                mNumberBuffers: 1,
+                mBuffers: AudioBuffer(
+                    mNumberChannels: 2,
+                    mDataByteSize: UInt32(stereoBufferSize * MemoryLayout<Int16>.size),
+                    mData: stereoBuffer
+                )
+            )
+
+            status = ExtAudioFileRead(input, &frameCount, &readList)
+            guard status == noErr else { throw AudioError.failedToRead(status) }
+            if frameCount == 0 { break }
+
+            for i in 0..<Int(frameCount) {
+                let left = Int32(stereoBuffer[i * 2])
+                let right = Int32(stereoBuffer[i * 2 + 1])
+                monoBuffer[i] = Int16((left + right) / 2)
+            }
+
+            var writeList = AudioBufferList(
+                mNumberBuffers: 1,
+                mBuffers: AudioBuffer(
+                    mNumberChannels: 1,
+                    mDataByteSize: UInt32(Int(frameCount) * MemoryLayout<Int16>.size),
+                    mData: monoBuffer
+                )
+            )
+
+            status = ExtAudioFileWrite(output, frameCount, &writeList)
+            guard status == noErr else { throw AudioError.failedToWrite(status) }
+        }
+
+        return monoURL
+    }
+
     /// Finds orphaned WAV files (WAV files in audio directory that were not cleaned up).
     static func findOrphanedWAVs() -> [URL] {
         let fm = FileManager.default
