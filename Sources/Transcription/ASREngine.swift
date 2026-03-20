@@ -1,4 +1,5 @@
 import Foundation
+import FluidAudio
 
 /// Automatic Speech Recognition engine.
 /// Wraps FluidAudio's Parakeet ASR with token-to-segment grouping.
@@ -18,19 +19,45 @@ final class ASREngine {
         }
     }
 
+    private var asrManager: AsrManager?
     private var isReady = false
 
-    /// Initialize with downloaded models. Called once at app startup.
-    func initialize() async throws {
-        // TODO: Task 5 — wire FluidAudio AsrManager here
+    /// Initialize with downloaded ASR models. Called once at app startup.
+    func initialize(models: AsrModels) async throws {
+        let manager = AsrManager(config: .default)
+        try await manager.initialize(models: models)
+        self.asrManager = manager
         isReady = true
     }
 
     /// Transcribe audio at the given URL. Returns segments, language, and duration.
     func transcribe(audioURL: URL) async throws -> (segments: [ASRSegment], language: String, duration: Double) {
-        guard isReady else { throw ASRError.notInitialized }
-        // TODO: Task 5 — call asrManager.transcribe(audioURL) and map results
-        throw ASRError.transcriptionFailed("FluidAudio integration pending — see Task 5")
+        guard isReady, let manager = asrManager else { throw ASRError.notInitialized }
+
+        do {
+            let result = try await manager.transcribe(audioURL)
+
+            // Map TokenTiming to our tuple format for the grouping function
+            let tokens: [(word: String, start: Double, end: Double)] = (result.tokenTimings ?? []).map { timing in
+                (word: timing.token, start: timing.startTime, end: timing.endTime)
+            }
+
+            let segments = Self.groupTokensIntoSegments(tokens: tokens)
+
+            // Fallback: if no token timings, single segment from full text
+            let finalSegments: [ASRSegment]
+            if segments.isEmpty && !result.text.isEmpty {
+                finalSegments = [ASRSegment(start: 0, end: result.duration, text: result.text)]
+            } else {
+                finalSegments = segments
+            }
+
+            return (segments: finalSegments, language: "en", duration: result.duration)
+        } catch let error as ASRError {
+            throw error
+        } catch {
+            throw ASRError.transcriptionFailed(error.localizedDescription)
+        }
     }
 
     // MARK: - Token Grouping (Pure Logic — Tested Independently)

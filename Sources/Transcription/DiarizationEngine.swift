@@ -1,4 +1,5 @@
 import Foundation
+import FluidAudio
 
 /// Speaker diarization engine.
 /// Wraps FluidAudio's SortformerDiarizer with output mapping.
@@ -18,19 +19,46 @@ final class DiarizationEngine {
         }
     }
 
+    private var diarizer: SortformerDiarizer?
     private var isReady = false
 
-    /// Initialize with downloaded models. Called once at app startup.
-    func initialize() async throws {
-        // TODO: Task 5 — wire FluidAudio SortformerDiarizer here
+    /// Initialize with a pre-configured SortformerDiarizer. Called once at app startup.
+    func initialize(diarizer: SortformerDiarizer) async throws {
+        self.diarizer = diarizer
         isReady = true
     }
 
     /// Run diarization on a mono audio file. Returns speaker segments sorted by start time.
     func diarize(audioURL: URL) async throws -> [SpeakerSegment] {
-        guard isReady else { throw DiarizationError.notInitialized }
-        // TODO: Task 5 — call diarizer.processComplete and map results
-        throw DiarizationError.diarizationFailed("FluidAudio integration pending — see Task 5")
+        guard isReady, let diarizer = diarizer else { throw DiarizationError.notInitialized }
+
+        do {
+            // Load audio samples from file URL
+            let audioConverter = AudioConverter()
+            let audioSamples = try audioConverter.resampleAudioFile(audioURL)
+
+            let timeline = try diarizer.processComplete(audioSamples)
+
+            // timeline.segments is [[SortformerSegment]] indexed by speaker slot
+            var rawSegments: [(speakerIndex: Int, startTime: Float, endTime: Float)] = []
+            for (speakerIndex, speakerSegments) in timeline.segments.enumerated() {
+                for segment in speakerSegments {
+                    rawSegments.append((
+                        speakerIndex: speakerIndex,
+                        startTime: segment.startTime,
+                        endTime: segment.endTime
+                    ))
+                }
+            }
+
+            let result = Self.mapToSpeakerSegments(rawSegments: rawSegments)
+            diarizer.reset()
+            return result
+        } catch let error as DiarizationError {
+            throw error
+        } catch {
+            throw DiarizationError.diarizationFailed(error.localizedDescription)
+        }
     }
 
     // MARK: - Output Mapping (Pure Logic — Tested Independently)
