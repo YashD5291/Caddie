@@ -2,16 +2,21 @@ import Foundation
 import os
 
 /// Queued actor that processes transcription jobs one at a time.
-/// Pipeline: ASR -> Diarize -> Merge -> Compress (ALAC) -> Write to DB
+/// Pipeline: Mono Mixdown -> ASR -> Diarize -> Merge -> Write DB -> Compress -> Done -> Delete WAV
 actor TranscriptionPipeline {
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "TranscriptionPipeline")
 
-    private let asrEngine = ASREngine()
-    private let diarizationEngine = DiarizationEngine()
+    private let asrEngine: ASREngine
+    private let diarizationEngine: DiarizationEngine
 
     private var queue: [(meetingId: String, database: AppDatabase?)] = []
     private var isProcessing = false
+
+    init(asr: ASREngine, diarization: DiarizationEngine) {
+        self.asrEngine = asr
+        self.diarizationEngine = diarization
+    }
 
     /// Enqueues a meeting for transcription processing.
     func enqueue(meetingId: String, database: AppDatabase? = nil) {
@@ -36,23 +41,32 @@ actor TranscriptionPipeline {
         logger.info("Starting transcription pipeline for meeting \(meetingId)")
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        // Update status to transcribing
         await updateMeetingStatus(meetingId: meetingId, status: .transcribing, database: database)
 
         do {
             let wavURL = AudioFileManager.wavPath(for: meetingId)
 
-            // Step 1: ASR
+            // Step 1: Create mono mixdown
+            logger.info("[\(meetingId)] Creating mono mixdown...")
+            let monoURL = try AudioFileManager.createMonoMixdown(stereoURL: wavURL)
+            logger.info("[\(meetingId)] Mono mixdown created")
+
+            defer {
+                // Clean up temp mono file after ASR + diarization
+                try? FileManager.default.removeItem(at: monoURL)
+            }
+
+            // Step 2: ASR
             logger.info("[\(meetingId)] Running ASR...")
-            let (asrSegments, language, duration) = try await asrEngine.transcribe(audioURL: wavURL)
+            let (asrSegments, language, duration) = try await asrEngine.transcribe(audioURL: monoURL)
             logger.info("[\(meetingId)] ASR complete: \(asrSegments.count) segments, language=\(language)")
 
-            // Step 2: Diarization
+            // Step 3: Diarization
             logger.info("[\(meetingId)] Running diarization...")
-            let speakerSegments = try await diarizationEngine.diarize(audioURL: wavURL)
+            let speakerSegments = try await diarizationEngine.diarize(audioURL: monoURL)
             logger.info("[\(meetingId)] Diarization complete: \(speakerSegments.count) speaker segments")
 
-            // Step 3: Merge
+            // Step 4: Merge
             let merged = TranscriptMerger.merge(asr: asrSegments, speakers: speakerSegments)
             let fullText = TranscriptMerger.generateFullText(segments: merged)
             let uniqueSpeakers = Set(merged.map(\.speaker)).count
@@ -70,7 +84,7 @@ actor TranscriptionPipeline {
 
             logger.info("[\(meetingId)] Transcript merged: \(transcript.numSegments) segments, \(transcript.numSpeakers) speakers")
 
-            // Step 4: Write transcript JSON to DB
+            // Step 5: Write transcript JSON to DB
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             let transcriptJSON = try encoder.encode(transcript)
@@ -85,14 +99,18 @@ actor TranscriptionPipeline {
                 }
             }
 
-            // Step 5: Compress WAV to ALAC
+            // Step 6: Compress WAV to ALAC
             logger.info("[\(meetingId)] Compressing to ALAC...")
             let alacURL = AudioFileManager.alacPath(for: meetingId)
             try AudioFileManager.compressToALAC(wavURL: wavURL, outputURL: alacURL)
             logger.info("[\(meetingId)] ALAC compression complete")
 
-            // Step 6: Update status to done
+            // Step 7: Update status to done
             await updateMeetingStatus(meetingId: meetingId, status: .done, database: database)
+
+            // Step 8: Delete stereo WAV (AFTER status is .done so retry is still possible on failure)
+            try? FileManager.default.removeItem(at: wavURL)
+            logger.info("[\(meetingId)] Stereo WAV deleted")
 
             logger.info("[\(meetingId)] Pipeline complete in \(String(format: "%.1f", processingTime))s")
 
@@ -100,7 +118,6 @@ actor TranscriptionPipeline {
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             logger.error("[\(meetingId)] Pipeline failed after \(String(format: "%.1f", elapsed))s: \(error.localizedDescription)")
 
-            // Update status to error with message
             if let db = database {
                 do {
                     try await db.dbWriter.write { dbConn in
@@ -117,7 +134,6 @@ actor TranscriptionPipeline {
 
         isProcessing = false
 
-        // Process next in queue
         if !queue.isEmpty {
             await processNext()
         }
