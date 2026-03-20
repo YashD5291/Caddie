@@ -1,39 +1,26 @@
 import Foundation
 import os
 import Observation
+import FluidAudio
 
 @Observable
 final class ModelManager {
     var isDownloading = false
     var downloadProgress: Double = 0
     var downloadError: String?
+    var modelsReady = false
 
-    var modelsReady: Bool {
-        let fm = FileManager.default
-        let dir = Self.modelsDirectory
-        let parakeetExists = fm.fileExists(atPath: dir.appendingPathComponent("parakeet").path)
-        let diarizationExists = fm.fileExists(atPath: dir.appendingPathComponent("diarization").path)
-        return parakeetExists && diarizationExists
-    }
+    private(set) var asrModels: AsrModels?
+    private(set) var diarizer: SortformerDiarizer?
 
-    static var modelsDirectory: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("Caddie/models", isDirectory: true)
-    }
+    private let logger = Logger(subsystem: "com.caddie.app", category: "ModelManager")
 
-    /// Check if models exist on disk; download them if not.
+    /// Downloads and loads ASR + diarization models via FluidAudio.
+    /// Models are cached by FluidAudio after first download.
+    /// Safe to call multiple times — returns immediately if already downloaded.
     func downloadModelsIfNeeded() async {
         guard !modelsReady else {
-            CaddieLogger.app.info("Models already present on disk")
-            return
-        }
-
-        let dir = Self.modelsDirectory
-        do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        } catch {
-            downloadError = "Failed to create models directory: \(error.localizedDescription)"
-            CaddieLogger.app.error("Failed to create models directory: \(error.localizedDescription)")
+            logger.info("Models already loaded")
             return
         }
 
@@ -41,38 +28,31 @@ final class ModelManager {
         downloadProgress = 0
         downloadError = nil
 
-        // TODO: FluidAudio likely handles its own model download.
-        // Wire up actual HuggingFace download here when ready.
-        CaddieLogger.app.info("Model download would start here")
-
-        downloadProgress = 1.0
-        isDownloading = false
-    }
-
-    /// Verify that model files on disk are valid.
-    func verifyModels() async -> Bool {
-        guard modelsReady else { return false }
-
-        let fm = FileManager.default
-        let dir = Self.modelsDirectory
-
-        let parakeetDir = dir.appendingPathComponent("parakeet")
-        let diarizationDir = dir.appendingPathComponent("diarization")
-
         do {
-            let parakeetContents = try fm.contentsOfDirectory(atPath: parakeetDir.path)
-            let diarizationContents = try fm.contentsOfDirectory(atPath: diarizationDir.path)
+            // Step 1: Download ASR models (~60% of total)
+            logger.info("Downloading ASR models...")
+            let models = try await AsrModels.downloadAndLoad(version: .v3)
+            asrModels = models
+            downloadProgress = 0.6
+            logger.info("ASR models downloaded and loaded")
 
-            if parakeetContents.isEmpty || diarizationContents.isEmpty {
-                CaddieLogger.app.warning("Model directories exist but are empty")
-                return false
-            }
+            // Step 2: Download and initialize Sortformer diarizer (~40% of total)
+            logger.info("Initializing diarizer...")
+            let sortformerModels = try await SortformerModels.loadFromHuggingFace(
+                config: .default
+            )
+            let sortformer = SortformerDiarizer(config: .default)
+            sortformer.initialize(models: sortformerModels)
+            diarizer = sortformer
+            downloadProgress = 1.0
+            logger.info("Diarizer initialized")
 
-            CaddieLogger.app.info("Model verification passed")
-            return true
+            modelsReady = true
         } catch {
-            CaddieLogger.app.error("Model verification failed: \(error.localizedDescription)")
-            return false
+            downloadError = error.localizedDescription
+            logger.error("Model download failed: \(error.localizedDescription)")
         }
+
+        isDownloading = false
     }
 }
