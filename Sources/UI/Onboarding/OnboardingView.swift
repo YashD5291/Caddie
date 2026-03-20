@@ -2,12 +2,14 @@ import SwiftUI
 
 struct OnboardingView: View {
     @Binding var isComplete: Bool
+    @Environment(AppState.self) private var appState
     @State private var micStatus: PermissionStatus = Permissions.microphone
     @State private var screenStatus: PermissionStatus = Permissions.screenRecording
     @State private var accessibilityStatus: PermissionStatus = Permissions.accessibility
     @State private var isRequesting = false
+    @State private var showModelDownload = false
 
-    private var canProceed: Bool {
+    private var permissionsGranted: Bool {
         micStatus == .granted && accessibilityStatus == .granted
     }
 
@@ -30,7 +32,23 @@ struct OnboardingView: View {
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, 32)
 
-            // Permission card
+            if showModelDownload {
+                modelDownloadSection
+            } else {
+                permissionsSection
+            }
+
+            Spacer()
+        }
+        .padding(40)
+        .frame(minWidth: 520, minHeight: 520)
+        .onAppear { refreshStatuses() }
+    }
+
+    // MARK: - Permissions Section
+
+    private var permissionsSection: some View {
+        VStack(spacing: 0) {
             VStack(spacing: 0) {
                 permissionRow(title: "Microphone", description: "Record meeting audio", icon: "mic.fill", status: micStatus)
                 Divider().padding(.leading, 44)
@@ -58,8 +76,9 @@ struct OnboardingView: View {
             }
 
             Button {
-                if canProceed {
-                    isComplete = true
+                if permissionsGranted {
+                    showModelDownload = true
+                    Task { await appState.modelManager.downloadModelsIfNeeded() }
                 } else {
                     requestPermissions()
                 }
@@ -67,7 +86,7 @@ struct OnboardingView: View {
                 if isRequesting {
                     ProgressView().controlSize(.small)
                 } else {
-                    Text(canProceed ? "Get Started" : "Grant Permissions")
+                    Text(permissionsGranted ? "Continue" : "Grant Permissions")
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -79,13 +98,71 @@ struct OnboardingView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
-
-            Spacer()
         }
-        .padding(40)
-        .frame(minWidth: 520, minHeight: 520)
-        .onAppear { refreshStatuses() }
     }
+
+    // MARK: - Model Download Section
+
+    @ViewBuilder
+    private var modelDownloadSection: some View {
+        VStack(spacing: 16) {
+            if let error = appState.modelManager.downloadError {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.red)
+
+                Text("Download Failed")
+                    .font(.headline)
+
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 350)
+
+                Button("Retry Download") {
+                    Task { await appState.modelManager.downloadModelsIfNeeded() }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.large)
+            } else if appState.modelManager.modelsReady {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.green)
+
+                Text("Models Ready")
+                    .font(.headline)
+
+                Button("Get Started") {
+                    isComplete = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.large)
+            } else {
+                Text("Downloading AI Models")
+                    .font(.headline)
+
+                Text("This is a one-time download (~1 GB).\nModels run entirely on your Mac.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                ProgressView(value: appState.modelManager.downloadProgress)
+                    .frame(maxWidth: 300)
+                    .padding(.vertical, 8)
+
+                Text("\(Int(appState.modelManager.downloadProgress * 100))%")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: 400)
+    }
+
+    // MARK: - Helpers
 
     private func permissionRow(title: String, description: String, icon: String, status: PermissionStatus, isOptional: Bool = false) -> some View {
         HStack(spacing: 12) {
