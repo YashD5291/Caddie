@@ -75,12 +75,11 @@ Plans:
   2. Starting a recording while the pipeline is still initializing does not crash or lose the recording (init race eliminated)
   3. AppState is a thin observable wrapper -- it does not contain recording lifecycle logic
   4. State transitions are tested with unit tests covering every valid and invalid transition
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
-- [ ] 04-03: TBD
+- [ ] 04-01-PLAN.md -- RecordingState enum with pure state machine (TDD: state/event/sideEffect types + exhaustive transition tests)
+- [ ] 04-02-PLAN.md -- RecordingCoordinator actor + AppState refactor to thin observable wrapper
 
 ### Phase 5: Pipeline Data Integrity
 **Goal**: No transcript is ever lost due to premature file deletion, failed DB writes, or concurrent processing bugs
@@ -173,8 +172,8 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 |-------|----------------|--------|-----------|
 | 1. Test Target Revival | 1/1 | Complete | 2026-03-22 |
 | 2. Test Infrastructure | 3/3 | Complete | 2026-03-22 |
-| 3. Audio Thread Safety | 0/2 | Not started | - |
-| 4. Recording Coordinator | 0/TBD | Not started | - |
+| 3. Audio Thread Safety | 2/2 | Complete | 2026-03-22 |
+| 4. Recording Coordinator | 0/2 | Not started | - |
 | 5. Pipeline Data Integrity | 0/TBD | Not started | - |
 | 6. Error Discipline | 0/TBD | Not started | - |
 | 7. Precondition Guards | 0/TBD | Not started | - |
