@@ -39,7 +39,7 @@ struct CaddieApp: App {
 
 // MARK: - AppDelegate
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     func applicationDidFinishLaunching(_ notification: Notification) {
         CaddieLogger.app.info("Caddie launched")
 
@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func windowWillClose(_ notification: Notification) {
-        DispatchQueue.main.async {
+        Task { @MainActor in
             let hasVisibleMainWindow = NSApp.windows.contains {
                 $0.isVisible && self.isMainAppWindow($0)
             }

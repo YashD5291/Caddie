@@ -2,7 +2,7 @@ import EventKit
 import Foundation
 import os
 
-final class CalendarMonitor: DetectionMonitor {
+final class CalendarMonitor: DetectionMonitor, @unchecked Sendable {
 
     var onSignal: ((DetectionSignal) -> Void)?
 
@@ -50,7 +50,7 @@ final class CalendarMonitor: DetectionMonitor {
         }
 
         logger.info("Calendar access granted")
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.poll()
             self?.startTimer()
         }

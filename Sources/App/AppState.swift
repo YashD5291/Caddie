@@ -8,6 +8,7 @@ enum AppStatus: String {
     case transcribing
 }
 
+@MainActor
 @Observable
 final class AppState {
     var status: AppStatus = .idle
@@ -56,15 +57,19 @@ final class AppState {
             }
 
             // 2. Initialize ASR engine
+            // nonisolated(unsafe) suppresses Swift 6 sending checks for FluidAudio
+            // types that aren't Sendable but are moved (not shared) to the engines.
             let asrEngine = ASREngine()
             if let asrModels = modelManager.asrModels {
-                try await asrEngine.initialize(models: asrModels)
+                nonisolated(unsafe) let models = asrModels
+                try await asrEngine.initialize(models: models)
             }
 
             // 3. Initialize diarization engine
             let diarizationEngine = DiarizationEngine()
             if let diarizer = modelManager.diarizer {
-                try await diarizationEngine.initialize(diarizer: diarizer)
+                nonisolated(unsafe) let d = diarizer
+                try await diarizationEngine.initialize(diarizer: d)
             }
 
             // 4. Create pipeline with injected engines

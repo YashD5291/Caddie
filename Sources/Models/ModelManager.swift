@@ -3,6 +3,7 @@ import os
 import Observation
 import FluidAudio
 
+@MainActor
 @Observable
 final class ModelManager {
     var isDownloading = false

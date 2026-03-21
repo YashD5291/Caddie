@@ -67,6 +67,9 @@ targets:
       - target: Caddie
       - package: GRDB
       - package: FluidAudio
+    settings:
+      base:
+        CLANG_ENABLE_CODE_COVERAGE: NO
 
 schemes:
   Caddie:
@@ -76,8 +79,6 @@ schemes:
     run:
       config: Debug
     test:
-      gatherCoverageData: true
-      coverageTargets:
-        - Caddie
+      gatherCoverageData: false
       targets:
         - CaddieTests

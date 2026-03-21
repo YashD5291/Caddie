@@ -65,7 +65,10 @@ enum Permissions {
     }
 
     static func requestAccessibility() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+        // Use string literal instead of kAXTrustedCheckOptionPrompt C global
+        // to avoid Swift 6 concurrency-safety error (SR-17471).
+        let promptKey = "AXTrustedCheckOptionPrompt" as CFString
+        let options = [promptKey: kCFBooleanTrue!] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
     }
 }
