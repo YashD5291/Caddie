@@ -191,6 +191,115 @@ final class TranscriptionPipelineTests: XCTestCase {
         }
     }
 
+    // MARK: - Data Integrity (DATA-02, DATA-03, DATA-04)
+
+    func testMonoFileDeletedAfterASRAndDiarization() async throws {
+        let meetingId = "mono-cleanup-\(UUID().uuidString.prefix(8))"
+        try insertMeeting(meetingId: meetingId)
+        try createMinimalWAV(for: meetingId)
+
+        await pipeline.enqueue(meetingId: meetingId, database: db)
+        _ = try await waitForMeetingStatus(meetingId, expected: .done)
+
+        // After success, no caddie_mono_* files should remain in temp
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempContents = try FileManager.default.contentsOfDirectory(
+            at: tempDir, includingPropertiesForKeys: nil
+        )
+        let orphanedMono = tempContents.filter { $0.lastPathComponent.hasPrefix("caddie_mono_") }
+        XCTAssertTrue(orphanedMono.isEmpty, "Mono file should be cleaned up after successful pipeline")
+    }
+
+    func testMonoAndWAVPreservedOnDBWriteFailure() async throws {
+        let meetingId = "db-fail-\(UUID().uuidString.prefix(8))"
+        try insertMeeting(meetingId: meetingId)
+        try createMinimalWAV(for: meetingId)
+
+        // Drop the meetings table so the transcript UPDATE throws
+        try await db.dbWriter.write { dbConn in
+            try dbConn.execute(sql: "DROP TABLE meetings")
+        }
+
+        let expectation = XCTestExpectation(description: "onComplete called with failure")
+        let resultBox = CallbackResultBox()
+
+        await pipeline.enqueue(meetingId: meetingId, database: db) { cbMeetingId, result in
+            resultBox.meetingId = cbMeetingId
+            resultBox.result = result
+            expectation.fulfill()
+        }
+
+        await fulfillment(of: [expectation], timeout: 10.0)
+
+        guard case .failure = resultBox.result else {
+            XCTFail("Expected .failure when DB write fails")
+            return
+        }
+
+        // DATA-02: WAV must survive when DB write fails
+        let wavURL = AudioFileManager.wavPath(for: meetingId)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: wavURL.path),
+            "WAV file must be preserved when DB write fails"
+        )
+    }
+
+    func testWAVPreservedOnALACCompressionFailure() async throws {
+        let meetingId = "alac-fail-\(UUID().uuidString.prefix(8))"
+        try insertMeeting(meetingId: meetingId)
+        try createMinimalWAV(for: meetingId)
+
+        // Make ALAC output path unwritable by creating a directory at the output path
+        let alacURL = AudioFileManager.alacPath(for: meetingId)
+        try FileManager.default.createDirectory(at: alacURL, withIntermediateDirectories: true)
+
+        let expectation = XCTestExpectation(description: "onComplete called")
+        let resultBox = CallbackResultBox()
+
+        await pipeline.enqueue(meetingId: meetingId, database: db) { cbMeetingId, result in
+            resultBox.meetingId = cbMeetingId
+            resultBox.result = result
+            expectation.fulfill()
+        }
+
+        await fulfillment(of: [expectation], timeout: 10.0)
+
+        // WAV must survive when compression fails
+        let wavURL = AudioFileManager.wavPath(for: meetingId)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: wavURL.path),
+            "WAV file must be preserved when ALAC compression fails"
+        )
+
+        // Clean up the directory we created
+        try? FileManager.default.removeItem(at: alacURL)
+    }
+
+    func testWAVDeletedOnlyAfterFullSuccess() async throws {
+        let meetingId = "full-success-\(UUID().uuidString.prefix(8))"
+        try insertMeeting(meetingId: meetingId)
+        try createMinimalWAV(for: meetingId)
+
+        await pipeline.enqueue(meetingId: meetingId, database: db)
+        let meeting = try await waitForMeetingStatus(meetingId, expected: .done)
+
+        XCTAssertEqual(meeting.status, .done)
+
+        // WAV should be deleted after full success
+        let wavURL = AudioFileManager.wavPath(for: meetingId)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: wavURL.path),
+            "WAV should be deleted after pipeline completes with .done"
+        )
+
+        // ALAC should exist
+        let alacURL = AudioFileManager.alacPath(for: meetingId)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: alacURL.path),
+            "ALAC file should exist after successful compression"
+        )
+    }
+
     // MARK: - Helpers
 
     private func insertMeeting(meetingId: String) throws {
