@@ -66,7 +66,6 @@ targets:
     dependencies:
       - target: Caddie
       - package: GRDB
-      - package: FluidAudio
     settings:
       base:
         CLANG_ENABLE_CODE_COVERAGE: NO
