@@ -10,7 +10,7 @@ actor TranscriptionPipeline {
     private let asrEngine: any ASREngineProtocol
     private let diarizationEngine: any DiarizationEngineProtocol
 
-    private var queue: [(meetingId: String, database: AppDatabase?)] = []
+    private var queue: [(meetingId: String, database: AppDatabase?, onComplete: (@Sendable (String, Result<Void, Error>) -> Void)?)] = []
     private var isProcessing = false
 
     init(asr: any ASREngineProtocol, diarization: any DiarizationEngineProtocol) {
@@ -19,8 +19,16 @@ actor TranscriptionPipeline {
     }
 
     /// Enqueues a meeting for transcription processing.
-    func enqueue(meetingId: String, database: AppDatabase? = nil) {
-        queue.append((meetingId, database))
+    /// - Parameters:
+    ///   - meetingId: The meeting identifier.
+    ///   - database: Optional database for status updates.
+    ///   - onComplete: Optional callback fired with (meetingId, result) when pipeline finishes.
+    func enqueue(
+        meetingId: String,
+        database: AppDatabase? = nil,
+        onComplete: (@Sendable (String, Result<Void, Error>) -> Void)? = nil
+    ) {
+        queue.append((meetingId, database, onComplete))
         logger.info("Enqueued meeting \(meetingId) for transcription (queue depth: \(self.queue.count))")
 
         if !isProcessing {
@@ -37,6 +45,7 @@ actor TranscriptionPipeline {
         let job = queue.removeFirst()
         let meetingId = job.meetingId
         let database = job.database
+        let onComplete = job.onComplete
 
         logger.info("Starting transcription pipeline for meeting \(meetingId)")
         let startTime = CFAbsoluteTimeGetCurrent()
@@ -114,6 +123,8 @@ actor TranscriptionPipeline {
 
             logger.info("[\(meetingId)] Pipeline complete in \(String(format: "%.1f", processingTime))s")
 
+            onComplete?(meetingId, .success(()))
+
         } catch {
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             logger.error("[\(meetingId)] Pipeline failed after \(String(format: "%.1f", elapsed))s: \(error.localizedDescription)")
@@ -130,6 +141,8 @@ actor TranscriptionPipeline {
                     logger.error("[\(meetingId)] Failed to write error status to DB: \(error.localizedDescription)")
                 }
             }
+
+            onComplete?(meetingId, .failure(error))
         }
 
         isProcessing = false

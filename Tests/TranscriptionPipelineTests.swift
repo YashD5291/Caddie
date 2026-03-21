@@ -118,6 +118,79 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertEqual(meeting.status, .error)
     }
 
+    // MARK: - onComplete Callback Tests
+
+    func testOnCompleteCalledOnSuccess() async throws {
+        let meetingId = "cb-success-\(UUID().uuidString.prefix(8))"
+        try insertMeeting(meetingId: meetingId)
+        try createMinimalWAV(for: meetingId)
+
+        let expectation = XCTestExpectation(description: "onComplete called with success")
+        let resultBox = CallbackResultBox()
+
+        await pipeline.enqueue(meetingId: meetingId, database: db) { cbMeetingId, result in
+            resultBox.meetingId = cbMeetingId
+            resultBox.result = result
+            expectation.fulfill()
+        }
+
+        await fulfillment(of: [expectation], timeout: 10.0)
+
+        XCTAssertEqual(resultBox.meetingId, meetingId)
+        guard case .success = resultBox.result else {
+            XCTFail("Expected .success result, got \(String(describing: resultBox.result))")
+            return
+        }
+    }
+
+    func testOnCompleteCalledOnASRFailure() async throws {
+        let meetingId = "cb-asr-fail-\(UUID().uuidString.prefix(8))"
+        try insertMeeting(meetingId: meetingId)
+        try createMinimalWAV(for: meetingId)
+
+        mockASR.stubbedError = TestError.simulated
+
+        let expectation = XCTestExpectation(description: "onComplete called with failure")
+        let resultBox = CallbackResultBox()
+
+        await pipeline.enqueue(meetingId: meetingId, database: db) { cbMeetingId, result in
+            resultBox.meetingId = cbMeetingId
+            resultBox.result = result
+            expectation.fulfill()
+        }
+
+        await fulfillment(of: [expectation], timeout: 10.0)
+
+        XCTAssertEqual(resultBox.meetingId, meetingId)
+        guard case .failure = resultBox.result else {
+            XCTFail("Expected .failure result, got \(String(describing: resultBox.result))")
+            return
+        }
+    }
+
+    func testOnCompleteCalledOnMissingWAV() async throws {
+        let meetingId = "cb-no-wav-\(UUID().uuidString.prefix(8))"
+        try insertMeeting(meetingId: meetingId)
+        // Intentionally NOT creating WAV
+
+        let expectation = XCTestExpectation(description: "onComplete called with failure for missing WAV")
+        let resultBox = CallbackResultBox()
+
+        await pipeline.enqueue(meetingId: meetingId, database: db) { cbMeetingId, result in
+            resultBox.meetingId = cbMeetingId
+            resultBox.result = result
+            expectation.fulfill()
+        }
+
+        await fulfillment(of: [expectation], timeout: 10.0)
+
+        XCTAssertEqual(resultBox.meetingId, meetingId)
+        guard case .failure = resultBox.result else {
+            XCTFail("Expected .failure result, got \(String(describing: resultBox.result))")
+            return
+        }
+    }
+
     // MARK: - Helpers
 
     private func insertMeeting(meetingId: String) throws {
@@ -194,6 +267,13 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTFail("Timed out waiting for status \(expected.rawValue), got \(meeting?.status.rawValue ?? "nil")")
         return meeting!
     }
+}
+
+// MARK: - Callback Result Box
+
+private final class CallbackResultBox: @unchecked Sendable {
+    var meetingId: String?
+    var result: Result<Void, Error>?
 }
 
 // MARK: - Test Error
