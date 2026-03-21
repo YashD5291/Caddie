@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 1 plan
 
 Plans:
-- [ ] 01-01-PLAN.md -- Update project.yml (Swift 6.0, coverageTargets, strict concurrency) and verify tests execute
+- [x] 01-01-PLAN.md -- Update project.yml (Swift 6.0, coverageTargets, strict concurrency) and verify tests execute
 
 ### Phase 2: Test Infrastructure
 **Goal**: ML engines and database are testable in isolation without hardware or model dependencies

@@ -9,8 +9,8 @@ Requirements for production-solid release. Each maps to roadmap phases.
 
 ### Build & Test Infrastructure
 
-- [ ] **BUILD-01**: Swift version updated from 5.9 to 6.0+ so GRDB 7.10 and strict concurrency checking are available
-- [ ] **BUILD-02**: Test target links and all existing tests execute (yyjson/coverage linker error resolved)
+- [x] **BUILD-01**: Swift version updated from 5.9 to 6.0+ so GRDB 7.10 and strict concurrency checking are available
+- [x] **BUILD-02**: Test target links and all existing tests execute (yyjson/coverage linker error resolved)
 - [ ] **BUILD-03**: ML engines abstracted behind protocols so tests run without FluidAudio dependency
 - [ ] **BUILD-04**: Database migration tests verify schema integrity on fresh and upgraded databases
 - [ ] **BUILD-05**: Pipeline error path tests cover failure recovery, concurrent enqueue, and status transitions
@@ -87,8 +87,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BUILD-01 | Phase 1: Test Target Revival | Pending |
-| BUILD-02 | Phase 1: Test Target Revival | Pending |
+| BUILD-01 | Phase 1: Test Target Revival | Complete |
+| BUILD-02 | Phase 1: Test Target Revival | Complete |
 | BUILD-03 | Phase 2: Test Infrastructure | Pending |
 | BUILD-04 | Phase 2: Test Infrastructure | Pending |
 | BUILD-05 | Phase 2: Test Infrastructure | Pending |
