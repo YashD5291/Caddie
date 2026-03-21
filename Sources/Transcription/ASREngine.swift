@@ -3,7 +3,7 @@ import FluidAudio
 
 /// Automatic Speech Recognition engine.
 /// Wraps FluidAudio's Parakeet ASR with token-to-segment grouping.
-final class ASREngine: @unchecked Sendable {
+final class ASREngine: ASREngineProtocol, @unchecked Sendable {
 
     enum ASRError: Error, LocalizedError {
         case notInitialized

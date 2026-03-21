@@ -7,13 +7,13 @@ actor TranscriptionPipeline {
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "TranscriptionPipeline")
 
-    private let asrEngine: ASREngine
-    private let diarizationEngine: DiarizationEngine
+    private let asrEngine: any ASREngineProtocol
+    private let diarizationEngine: any DiarizationEngineProtocol
 
     private var queue: [(meetingId: String, database: AppDatabase?)] = []
     private var isProcessing = false
 
-    init(asr: ASREngine, diarization: DiarizationEngine) {
+    init(asr: any ASREngineProtocol, diarization: any DiarizationEngineProtocol) {
         self.asrEngine = asr
         self.diarizationEngine = diarization
     }

@@ -3,7 +3,7 @@ import FluidAudio
 
 /// Speaker diarization engine.
 /// Wraps FluidAudio's SortformerDiarizer with output mapping.
-final class DiarizationEngine: @unchecked Sendable {
+final class DiarizationEngine: DiarizationEngineProtocol, @unchecked Sendable {
 
     enum DiarizationError: Error, LocalizedError {
         case notInitialized
