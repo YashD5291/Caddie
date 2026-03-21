@@ -3,7 +3,7 @@ import os
 
 // MARK: - DetectedMeeting
 
-struct DetectedMeeting {
+struct DetectedMeeting: Sendable {
     let app: String
     let title: String
     let processId: pid_t?

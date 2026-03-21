@@ -1,8 +1,8 @@
-import Testing
+import XCTest
 @testable import Caddie
 
-@Suite("RecordingState - Pure State Machine")
-struct RecordingStateTests {
+@MainActor
+final class RecordingStateTests: XCTestCase {
 
     // MARK: - Test Helpers
 
@@ -12,291 +12,269 @@ struct RecordingStateTests {
 
     // MARK: - Valid Transitions
 
-    @Test("idle + meetingDetected -> recording with startRecording side effect")
-    func idleToRecording() {
+    func testIdleToRecording() {
         let meeting = makeMeeting()
         let result = RecordingState.reduce(state: .idle, event: .meetingDetected(meeting))
 
-        #expect(result != nil)
+        XCTAssertNotNil(result)
         let (newState, sideEffect) = result!
         guard case .recording(let meetingId) = newState else {
-            Issue.record("Expected .recording state, got \(newState)")
+            XCTFail("Expected .recording state, got \(newState)")
             return
         }
-        #expect(!meetingId.isEmpty)
+        XCTAssertFalse(meetingId.isEmpty)
 
         guard case .startRecording(let effectId, let effectMeeting) = sideEffect else {
-            Issue.record("Expected .startRecording side effect, got \(String(describing: sideEffect))")
+            XCTFail("Expected .startRecording side effect, got \(String(describing: sideEffect))")
             return
         }
-        #expect(effectId == meetingId)
-        #expect(effectMeeting.app == "Zoom")
+        XCTAssertEqual(effectId, meetingId)
+        XCTAssertEqual(effectMeeting.app, "Zoom")
     }
 
-    @Test("recording + meetingEnded -> transcribing with stopAndTranscribe side effect")
-    func recordingToTranscribing() {
+    func testRecordingToTranscribing() {
         let result = RecordingState.reduce(
             state: .recording(meetingId: "abc123"),
             event: .meetingEnded
         )
 
-        #expect(result != nil)
+        XCTAssertNotNil(result)
         let (newState, sideEffect) = result!
         guard case .transcribing(let meetingId) = newState else {
-            Issue.record("Expected .transcribing state, got \(newState)")
+            XCTFail("Expected .transcribing state, got \(newState)")
             return
         }
-        #expect(meetingId == "abc123")
+        XCTAssertEqual(meetingId, "abc123")
 
         guard case .stopAndTranscribe(let effectId) = sideEffect else {
-            Issue.record("Expected .stopAndTranscribe side effect")
+            XCTFail("Expected .stopAndTranscribe side effect")
             return
         }
-        #expect(effectId == "abc123")
+        XCTAssertEqual(effectId, "abc123")
     }
 
-    @Test("recording + recordingFailed -> error with notifyError side effect")
-    func recordingToError() {
+    func testRecordingToError() {
         let testError = TestError.sample
         let result = RecordingState.reduce(
             state: .recording(meetingId: "abc123"),
             event: .recordingFailed(testError)
         )
 
-        #expect(result != nil)
+        XCTAssertNotNil(result)
         let (newState, sideEffect) = result!
         guard case .error(let meetingId, _) = newState else {
-            Issue.record("Expected .error state, got \(newState)")
+            XCTFail("Expected .error state, got \(newState)")
             return
         }
-        #expect(meetingId == "abc123")
+        XCTAssertEqual(meetingId, "abc123")
 
         guard case .notifyError(let effectId, _) = sideEffect else {
-            Issue.record("Expected .notifyError side effect")
+            XCTFail("Expected .notifyError side effect")
             return
         }
-        #expect(effectId == "abc123")
+        XCTAssertEqual(effectId, "abc123")
     }
 
-    @Test("transcribing + transcriptionComplete -> idle with notifyComplete side effect")
-    func transcribingToIdle() {
+    func testTranscribingToIdle() {
         let result = RecordingState.reduce(
             state: .transcribing(meetingId: "abc123"),
             event: .transcriptionComplete(meetingId: "abc123")
         )
 
-        #expect(result != nil)
+        XCTAssertNotNil(result)
         let (newState, sideEffect) = result!
         guard case .idle = newState else {
-            Issue.record("Expected .idle state, got \(newState)")
+            XCTFail("Expected .idle state, got \(newState)")
             return
         }
 
         guard case .notifyComplete(let effectId) = sideEffect else {
-            Issue.record("Expected .notifyComplete side effect")
+            XCTFail("Expected .notifyComplete side effect")
             return
         }
-        #expect(effectId == "abc123")
+        XCTAssertEqual(effectId, "abc123")
     }
 
-    @Test("transcribing + transcriptionFailed -> error with notifyError side effect")
-    func transcribingToError() {
+    func testTranscribingToError() {
         let testError = TestError.sample
         let result = RecordingState.reduce(
             state: .transcribing(meetingId: "abc123"),
             event: .transcriptionFailed(meetingId: "abc123", testError)
         )
 
-        #expect(result != nil)
+        XCTAssertNotNil(result)
         let (newState, sideEffect) = result!
         guard case .error(let meetingId, _) = newState else {
-            Issue.record("Expected .error state, got \(newState)")
+            XCTFail("Expected .error state, got \(newState)")
             return
         }
-        #expect(meetingId == "abc123")
+        XCTAssertEqual(meetingId, "abc123")
 
         guard case .notifyError(let effectId, _) = sideEffect else {
-            Issue.record("Expected .notifyError side effect")
+            XCTFail("Expected .notifyError side effect")
             return
         }
-        #expect(effectId == "abc123")
+        XCTAssertEqual(effectId, "abc123")
     }
 
-    @Test("error + retryRequested -> transcribing with retryTranscription side effect")
-    func errorToTranscribing() {
+    func testErrorToTranscribing() {
         let result = RecordingState.reduce(
             state: .error(meetingId: "abc123", TestError.sample),
             event: .retryRequested(meetingId: "abc123")
         )
 
-        #expect(result != nil)
+        XCTAssertNotNil(result)
         let (newState, sideEffect) = result!
         guard case .transcribing(let meetingId) = newState else {
-            Issue.record("Expected .transcribing state, got \(newState)")
+            XCTFail("Expected .transcribing state, got \(newState)")
             return
         }
-        #expect(meetingId == "abc123")
+        XCTAssertEqual(meetingId, "abc123")
 
         guard case .retryTranscription(let effectId) = sideEffect else {
-            Issue.record("Expected .retryTranscription side effect")
+            XCTFail("Expected .retryTranscription side effect")
             return
         }
-        #expect(effectId == "abc123")
+        XCTAssertEqual(effectId, "abc123")
     }
 
-    @Test("error + reset -> idle with no side effect")
-    func errorToIdle() {
+    func testErrorToIdle() {
         let result = RecordingState.reduce(
             state: .error(meetingId: "abc123", TestError.sample),
             event: .reset
         )
 
-        #expect(result != nil)
+        XCTAssertNotNil(result)
         let (newState, sideEffect) = result!
         guard case .idle = newState else {
-            Issue.record("Expected .idle state, got \(newState)")
+            XCTFail("Expected .idle state, got \(newState)")
             return
         }
-        #expect(sideEffect == nil)
+        XCTAssertNil(sideEffect)
     }
 
     // MARK: - Invalid Transitions
 
-    @Test("idle + meetingEnded -> nil (not recording)")
-    func idleMeetingEndedIsInvalid() {
+    func testIdleMeetingEndedIsInvalid() {
         let result = RecordingState.reduce(state: .idle, event: .meetingEnded)
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    @Test("idle + transcriptionComplete -> nil (not transcribing)")
-    func idleTranscriptionCompleteIsInvalid() {
+    func testIdleTranscriptionCompleteIsInvalid() {
         let result = RecordingState.reduce(
             state: .idle,
             event: .transcriptionComplete(meetingId: "abc123")
         )
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    @Test("idle + retryRequested -> nil (no error to retry)")
-    func idleRetryIsInvalid() {
+    func testIdleRetryIsInvalid() {
         let result = RecordingState.reduce(
             state: .idle,
             event: .retryRequested(meetingId: "abc123")
         )
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    @Test("recording + meetingDetected -> nil (already recording)")
-    func recordingMeetingDetectedIsInvalid() {
+    func testRecordingMeetingDetectedIsInvalid() {
         let result = RecordingState.reduce(
             state: .recording(meetingId: "abc123"),
             event: .meetingDetected(makeMeeting())
         )
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    @Test("recording + transcriptionComplete -> nil (not transcribing yet)")
-    func recordingTranscriptionCompleteIsInvalid() {
+    func testRecordingTranscriptionCompleteIsInvalid() {
         let result = RecordingState.reduce(
             state: .recording(meetingId: "abc123"),
             event: .transcriptionComplete(meetingId: "abc123")
         )
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    @Test("transcribing + meetingDetected -> nil (busy transcribing)")
-    func transcribingMeetingDetectedIsInvalid() {
+    func testTranscribingMeetingDetectedIsInvalid() {
         let result = RecordingState.reduce(
             state: .transcribing(meetingId: "abc123"),
             event: .meetingDetected(makeMeeting())
         )
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    @Test("transcribing + meetingEnded -> nil (already stopped)")
-    func transcribingMeetingEndedIsInvalid() {
+    func testTranscribingMeetingEndedIsInvalid() {
         let result = RecordingState.reduce(
             state: .transcribing(meetingId: "abc123"),
             event: .meetingEnded
         )
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    // MARK: - Additional Edge Cases
+    // MARK: - Additional Invalid Transitions
 
-    @Test("idle + recordingFailed -> nil (not recording)")
-    func idleRecordingFailedIsInvalid() {
+    func testIdleRecordingFailedIsInvalid() {
         let result = RecordingState.reduce(
             state: .idle,
             event: .recordingFailed(TestError.sample)
         )
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    @Test("idle + reset -> nil (already idle)")
-    func idleResetIsInvalid() {
+    func testIdleResetIsInvalid() {
         let result = RecordingState.reduce(state: .idle, event: .reset)
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    @Test("error + meetingDetected -> nil (must reset first)")
-    func errorMeetingDetectedIsInvalid() {
+    func testErrorMeetingDetectedIsInvalid() {
         let result = RecordingState.reduce(
             state: .error(meetingId: "abc123", TestError.sample),
             event: .meetingDetected(makeMeeting())
         )
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    @Test("error + meetingEnded -> nil (not recording)")
-    func errorMeetingEndedIsInvalid() {
+    func testErrorMeetingEndedIsInvalid() {
         let result = RecordingState.reduce(
             state: .error(meetingId: "abc123", TestError.sample),
             event: .meetingEnded
         )
-        #expect(result == nil)
+        XCTAssertNil(result)
     }
 
-    // MARK: - State Equatable
+    // MARK: - Equatable
 
-    @Test("RecordingState idle cases are equal")
-    func idleEquality() {
-        #expect(RecordingState.idle == RecordingState.idle)
+    func testIdleEquality() {
+        XCTAssertEqual(RecordingState.idle, RecordingState.idle)
     }
 
-    @Test("RecordingState recording cases with same meetingId are equal")
-    func recordingEquality() {
-        #expect(
-            RecordingState.recording(meetingId: "abc") ==
+    func testRecordingEqualitySameId() {
+        XCTAssertEqual(
+            RecordingState.recording(meetingId: "abc"),
             RecordingState.recording(meetingId: "abc")
         )
     }
 
-    @Test("RecordingState recording cases with different meetingId are not equal")
-    func recordingInequality() {
-        #expect(
-            RecordingState.recording(meetingId: "abc") !=
+    func testRecordingInequalityDifferentId() {
+        XCTAssertNotEqual(
+            RecordingState.recording(meetingId: "abc"),
             RecordingState.recording(meetingId: "xyz")
         )
     }
 
-    // MARK: - meetingDetected generates unique meetingId
+    // MARK: - Unique Meeting IDs
 
-    @Test("Two meetingDetected transitions generate different meetingIds")
-    func uniqueMeetingIds() {
+    func testUniqueMeetingIds() {
         let meeting = makeMeeting()
         let result1 = RecordingState.reduce(state: .idle, event: .meetingDetected(meeting))
         let result2 = RecordingState.reduce(state: .idle, event: .meetingDetected(meeting))
 
-        #expect(result1 != nil)
-        #expect(result2 != nil)
+        XCTAssertNotNil(result1)
+        XCTAssertNotNil(result2)
 
         guard case .recording(let id1) = result1!.newState,
               case .recording(let id2) = result2!.newState else {
-            Issue.record("Expected .recording states")
+            XCTFail("Expected .recording states")
             return
         }
-        #expect(id1 != id2)
+        XCTAssertNotEqual(id1, id2)
     }
 }
 
