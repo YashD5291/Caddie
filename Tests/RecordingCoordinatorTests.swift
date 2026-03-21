@@ -250,6 +250,44 @@ final class RecordingCoordinatorTests: XCTestCase {
         // Accept either .idle (success) or .error (failure) -- both prove the callback works
     }
 
+    // MARK: - Disk Space Guard
+
+    func testInsufficientDiskSpaceBlocksRecording() async {
+        let coordinator = makeCoordinator()
+
+        // Drive to .recording state first
+        await coordinator.handle(.meetingDetected(makeMeeting()))
+        let recordingState = await coordinator.state
+        guard case .recording(let meetingId) = recordingState else {
+            XCTFail("Expected .recording state")
+            return
+        }
+
+        // Simulate disk space failure by sending recordingFailed with insufficientDiskSpace
+        let error = CoordinatorError.insufficientDiskSpace(
+            available: 100 * 1024 * 1024,  // 100 MB
+            required: 500 * 1024 * 1024     // 500 MB
+        )
+        await coordinator.handle(.recordingFailed(error))
+
+        let finalState = await coordinator.state
+        guard case .error(let errorMeetingId, _) = finalState else {
+            XCTFail("Expected .error state after insufficient disk space, got \(finalState)")
+            return
+        }
+        XCTAssertEqual(errorMeetingId, meetingId)
+    }
+
+    func testInsufficientDiskSpaceErrorDescription() {
+        let error = CoordinatorError.insufficientDiskSpace(
+            available: 100 * 1024 * 1024,
+            required: 500 * 1024 * 1024
+        )
+        let description = error.errorDescription ?? ""
+        XCTAssertTrue(description.contains("disk space"), "Error should mention disk space, got: \(description)")
+        XCTAssertTrue(description.contains("500"), "Error should mention required MB, got: \(description)")
+    }
+
     // MARK: - Convenience Methods (Existing)
 
     func testStopRecordingForwardsEvent() async throws {

@@ -96,6 +96,24 @@ actor RecordingCoordinator {
         await handle(.retryRequested(meetingId: meetingId))
     }
 
+    // MARK: - Precondition Checks
+
+    private static let minimumDiskSpaceBytes: Int64 = 500 * 1024 * 1024  // 500 MB
+
+    private func checkDiskSpace() throws {
+        let resourceValues = try AudioFileManager.audioDirectory.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+        )
+        guard let available = resourceValues.volumeAvailableCapacityForImportantUsage,
+              available >= Self.minimumDiskSpaceBytes else {
+            let available = resourceValues.volumeAvailableCapacityForImportantUsage ?? 0
+            throw CoordinatorError.insufficientDiskSpace(
+                available: available,
+                required: Self.minimumDiskSpaceBytes
+            )
+        }
+    }
+
     // MARK: - Side Effect Execution
 
     private func execute(_ effect: RecordingSideEffect) async {
@@ -118,6 +136,14 @@ actor RecordingCoordinator {
     }
 
     private func executeStartRecording(meetingId: String, meeting: DetectedMeeting) async {
+        do {
+            try checkDiskSpace()
+        } catch {
+            logger.error("Disk space check failed: \(error.localizedDescription)")
+            await handle(.recordingFailed(error))
+            return
+        }
+
         let now = ISO8601DateFormatter().string(from: Date())
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
@@ -256,11 +282,15 @@ actor RecordingCoordinator {
 
 enum CoordinatorError: Error, LocalizedError {
     case audioFileNotFound(String)
+    case insufficientDiskSpace(available: Int64, required: Int64)
 
     var errorDescription: String? {
         switch self {
         case .audioFileNotFound(let meetingId):
             return "Audio file not found for meeting \(meetingId)"
+        case .insufficientDiskSpace(let available, _):
+            let availableMB = available / (1024 * 1024)
+            return "Not enough disk space to record. Available: \(availableMB) MB, required: 500 MB. Free up space and try again."
         }
     }
 }
