@@ -11,9 +11,9 @@ Requirements for production-solid release. Each maps to roadmap phases.
 
 - [x] **BUILD-01**: Swift version updated from 5.9 to 6.0+ so GRDB 7.10 and strict concurrency checking are available
 - [x] **BUILD-02**: Test target links and all existing tests execute (yyjson/coverage linker error resolved)
-- [ ] **BUILD-03**: ML engines abstracted behind protocols so tests run without FluidAudio dependency
-- [ ] **BUILD-04**: Database migration tests verify schema integrity on fresh and upgraded databases
-- [ ] **BUILD-05**: Pipeline error path tests cover failure recovery, concurrent enqueue, and status transitions
+- [x] **BUILD-03**: ML engines abstracted behind protocols so tests run without FluidAudio dependency
+- [x] **BUILD-04**: Database migration tests verify schema integrity on fresh and upgraded databases
+- [x] **BUILD-05**: Pipeline error path tests cover failure recovery, concurrent enqueue, and status transitions
 
 ### Recording Core Safety
 

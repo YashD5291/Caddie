@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-03-21T21:35:34.571Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-03-21T22:03:38.998Z"
 progress:
   total_phases: 9
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
+  completed_phases: 3
+  total_plans: 6
+  completed_plans: 6
 ---
 
 # Project State
@@ -19,34 +19,40 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 01 — test-target-revival
+**Current focus:** Phase 02 complete -- ready for Phase 03
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
+Phase: 02 (test-infrastructure) — COMPLETE
+Plan: 3 of 3 (all complete)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
-- Average duration: -
-- Total execution time: 0 hours
+- Total plans completed: 4
+- Average duration: ~9 min
+- Total execution time: ~0.6 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| Phase 01 | 1 | 26min | 26min |
+| Phase 02 | 3 | 11min | ~4min |
 
 **Recent Trend:**
 
-- Last 5 plans: -
-- Trend: -
+- Last 5 plans: 26m, 4m, 2m, 5m
+- Trend: Accelerating
 
 *Updated after each plan completion*
 | Phase 01 P01 | 26min | 2 tasks | 9 files |
+| Phase 02 P01 | 4min | 2 tasks | 9 files |
+| Phase 02 P02 | 2min | 1 task | 1 file |
+| Phase 02 P03 | 5min | 1 task | 1 file |
+| Phase 03 P01 | 5min | 2 tasks | 3 files |
+| Phase 03 P02 | 5min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -61,6 +67,9 @@ Recent decisions affecting current work:
 - [Phase 01]: Swift 6.0 with SWIFT_STRICT_CONCURRENCY: complete -- full data race checking enabled
 - [Phase 01]: CLANG_ENABLE_CODE_COVERAGE: NO on test target -- fallback fix for yyjson linker crash
 - [Phase 01]: @MainActor on AppState and ModelManager -- formalizes existing main-thread-only usage
+- [Phase 02]: Used 'any ASREngineProtocol' (existential) not 'some' (opaque) -- actors require existential types for stored protocol properties
+- [Phase 02]: @MainActor required on async XCTestCase subclasses for Swift 6 test discovery
+- [Phase 02]: Polling-based async wait pattern for pipeline tests (100ms intervals, 10s timeout)
 
 ### Pending Todos
 
@@ -68,12 +77,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- Test target completely broken (yyjson linker error) -- blocks all verification
 - Swift 5.9 -> 6.0+ upgrade may surface strict concurrency warnings across codebase
 - GRDB 7.10 requires Swift 6.1 (Xcode 16.3+) -- need to verify Xcode version
 
 ## Session Continuity
 
-Last session: 2026-03-21T21:29:58.916Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-03-21T21:57:47.000Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None

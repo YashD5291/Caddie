@@ -12,8 +12,8 @@ This milestone takes a working-on-the-happy-path macOS meeting recorder and make
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Test Target Revival** - Fix linker error and Swift version so tests execute
-- [ ] **Phase 2: Test Infrastructure** - Protocol-based DI and test coverage for critical paths
+- [x] **Phase 1: Test Target Revival** - Fix linker error and Swift version so tests execute
+- [x] **Phase 2: Test Infrastructure** - Protocol-based DI and test coverage for critical paths
 - [ ] **Phase 3: Audio Thread Safety** - Lock-free ring buffer and use-after-free fix on real-time thread
 - [ ] **Phase 4: Recording Coordinator** - Actor-based state machine replacing god-object AppState
 - [ ] **Phase 5: Pipeline Data Integrity** - Eliminate transcript data loss from premature file deletion and failed DB writes
@@ -48,9 +48,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- Extract ASREngineProtocol/DiarizationEngineProtocol, refactor pipeline to protocols, create mocks, remove FluidAudio from test target
-- [ ] 02-02-PLAN.md -- Database migration tests (schema, constraints, indexes, FTS5 triggers, idempotency)
-- [ ] 02-03-PLAN.md -- Pipeline error path tests (ASR/diarization failure, concurrent enqueue, status transitions)
+- [x] 02-01-PLAN.md -- Extract ASREngineProtocol/DiarizationEngineProtocol, refactor pipeline to protocols, create mocks, remove FluidAudio from test target
+- [x] 02-02-PLAN.md -- Database migration tests (schema, constraints, indexes, FTS5 triggers, idempotency)
+- [x] 02-03-PLAN.md -- Pipeline error path tests (ASR/diarization failure, concurrent enqueue, status transitions)
 
 ### Phase 3: Audio Thread Safety
 **Goal**: The real-time audio render callback cannot crash the app or cause priority inversion
@@ -172,7 +172,7 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Test Target Revival | 1/1 | Complete | 2026-03-22 |
-| 2. Test Infrastructure | 0/3 | Planned | - |
+| 2. Test Infrastructure | 3/3 | Complete | 2026-03-22 |
 | 3. Audio Thread Safety | 0/2 | Not started | - |
 | 4. Recording Coordinator | 0/TBD | Not started | - |
 | 5. Pipeline Data Integrity | 0/TBD | Not started | - |
