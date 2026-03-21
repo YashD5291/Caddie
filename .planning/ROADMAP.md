@@ -122,10 +122,10 @@ Plans:
   1. Recording refuses to start and shows an alert if available disk space is below 500MB
   2. Model download during onboarding times out after 5 minutes with a clear error message and retry option
   3. Both precondition failures are recoverable -- user can free space or retry download and proceed
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 07-01: TBD
+- [ ] 07-01-PLAN.md -- Disk space guard in RecordingCoordinator + model download timeout in ModelManager
 
 ### Phase 8: User Feedback
 **Goal**: Users always know what Caddie is doing -- recording status, transcription progress, and completion are visible
@@ -177,6 +177,6 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 | 4. Recording Coordinator | 2/3 | In progress | - |
 | 5. Pipeline Data Integrity | 0/TBD | Not started | - |
 | 6. Error Discipline | 0/TBD | Not started | - |
-| 7. Precondition Guards | 0/TBD | Not started | - |
+| 7. Precondition Guards | 0/1 | Not started | - |
 | 8. User Feedback | 0/TBD | Not started | - |
 | 9. Recording Resilience | 0/TBD | Not started | - |
