@@ -108,11 +108,11 @@ Plans:
   2. Zero force unwraps on file system directory access -- all replaced with guard-let-else-throw
   3. Every weak self closure in signal handlers logs when self is nil instead of silently returning
   4. TranscriptionPipeline cannot execute two jobs concurrently (actor reentrancy eliminated)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 06-01: TBD
-- [ ] 06-02: TBD
+- [ ] 06-01-PLAN.md -- Replace all try? with do-catch logging and all force unwraps with guard-let (ERR-01, ERR-02)
+- [ ] 06-02-PLAN.md -- Guard-let-self in all weak self closures and actor reentrancy fix in TranscriptionPipeline (ERR-03, ERR-04)
 
 ### Phase 7: Precondition Guards
 **Goal**: Recording and onboarding fail fast with clear user feedback instead of failing mid-operation
@@ -176,7 +176,7 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 | 3. Audio Thread Safety | 2/2 | Complete | 2026-03-22 |
 | 4. Recording Coordinator | 3/3 | Complete | 2026-03-22 |
 | 5. Pipeline Data Integrity | 0/3 | Not started | - |
-| 6. Error Discipline | 0/TBD | Not started | - |
+| 6. Error Discipline | 0/2 | Not started | - |
 | 7. Precondition Guards | 0/TBD | Not started | - |
 | 8. User Feedback | 0/TBD | Not started | - |
 | 9. Recording Resilience | 0/TBD | Not started | - |
