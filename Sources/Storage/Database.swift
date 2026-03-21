@@ -6,14 +6,17 @@ struct AppDatabase {
 
     /// Creates a production database at ~/Library/Application Support/Caddie/caddie.db
     init() throws {
-        let appSupport = FileManager.default.urls(
+        guard let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
-        ).first!.appendingPathComponent("Caddie", isDirectory: true)
+        ).first else {
+            throw DatabaseError.appSupportDirectoryUnavailable
+        }
+        let caddieDir = appSupport.appendingPathComponent("Caddie", isDirectory: true)
 
-        try FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: caddieDir, withIntermediateDirectories: true)
 
-        let dbPath = appSupport.appendingPathComponent("caddie.db").path
+        let dbPath = caddieDir.appendingPathComponent("caddie.db").path
         var config = Configuration()
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA journal_mode = WAL")
@@ -36,5 +39,18 @@ struct AppDatabase {
         var migrator = DatabaseMigrator()
         Migrations.run(&migrator)
         try migrator.migrate(writer)
+    }
+}
+
+// MARK: - Errors
+
+enum DatabaseError: Error, LocalizedError {
+    case appSupportDirectoryUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .appSupportDirectoryUnavailable:
+            return "Application Support directory not found"
+        }
     }
 }

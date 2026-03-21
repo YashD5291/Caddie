@@ -61,7 +61,7 @@ struct MeetingListView: View {
     private var groupedMeetings: [DateGroup] {
         let grouped = Dictionary(grouping: meetings) { $0.date }
         return grouped.keys.sorted(by: >).map { date in
-            DateGroup(date: date, meetings: grouped[date]!.sorted { $0.startTime > $1.startTime })
+            DateGroup(date: date, meetings: (grouped[date] ?? []).sorted { $0.startTime > $1.startTime })
         }
     }
 }

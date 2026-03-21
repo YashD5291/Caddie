@@ -60,15 +60,6 @@ actor TranscriptionPipeline {
             let monoURL = try AudioFileManager.createMonoMixdown(stereoURL: wavURL)
             logger.info("[\(meetingId)] Mono mixdown created")
 
-            defer {
-                // Clean up temp mono file after ASR + diarization
-                do {
-                    try FileManager.default.removeItem(at: monoURL)
-                } catch {
-                    logger.warning("Failed to remove mono temp file \(monoURL.lastPathComponent): \(error.localizedDescription)")
-                }
-            }
-
             // Step 2: ASR
             logger.info("[\(meetingId)] Running ASR...")
             let (asrSegments, language, duration) = try await asrEngine.transcribe(audioURL: monoURL)
@@ -78,6 +69,14 @@ actor TranscriptionPipeline {
             logger.info("[\(meetingId)] Running diarization...")
             let speakerSegments = try await diarizationEngine.diarize(audioURL: monoURL)
             logger.info("[\(meetingId)] Diarization complete: \(speakerSegments.count) speaker segments")
+
+            // DATA-03: Clean up mono file explicitly after BOTH ASR and diarization complete.
+            // Previously used defer{} which ran even if ASR/diarization was still reading the file.
+            do {
+                try FileManager.default.removeItem(at: monoURL)
+            } catch {
+                logger.warning("Failed to remove mono temp file \(monoURL.lastPathComponent): \(error.localizedDescription)")
+            }
 
             // Step 4: Merge
             let merged = TranscriptMerger.merge(asr: asrSegments, speakers: speakerSegments)
@@ -97,7 +96,8 @@ actor TranscriptionPipeline {
 
             logger.info("[\(meetingId)] Transcript merged: \(transcript.numSegments) segments, \(transcript.numSpeakers) speakers")
 
-            // Step 5: Write transcript JSON to DB
+            // Step 5: Write transcript JSON to DB -- HARD GATE (DATA-02)
+            // If this fails, preserve ALL source files for retry.
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             let transcriptJSON = try encoder.encode(transcript)
@@ -121,7 +121,7 @@ actor TranscriptionPipeline {
             // Step 7: Update status to done
             await updateMeetingStatus(meetingId: meetingId, status: .done, database: database)
 
-            // Step 8: Delete stereo WAV (AFTER status is .done so retry is still possible on failure)
+            // DATA-04: Delete WAV only after ALAC compression succeeded AND status is .done
             do {
                 try FileManager.default.removeItem(at: wavURL)
             } catch {
@@ -134,6 +134,9 @@ actor TranscriptionPipeline {
             onComplete?(meetingId, .success(()))
 
         } catch {
+            // On failure: do NOT delete mono or WAV -- they must survive for retry.
+            // Mono was already cleaned up after step 3 if ASR+diarization completed.
+            // WAV must ALWAYS survive on error for retry capability.
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             logger.error("[\(meetingId)] Pipeline failed after \(String(format: "%.1f", elapsed))s: \(error.localizedDescription)")
 

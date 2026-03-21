@@ -7,11 +7,14 @@ enum AudioFileManager {
 
     /// Base directory for all audio files.
     static var audioDirectory: URL {
-        let appSupport = FileManager.default.urls(
+        guard let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
-        ).first!.appendingPathComponent("Caddie/audio", isDirectory: true)
-        return appSupport
+        ).first else {
+            // applicationSupportDirectory is guaranteed by macOS; this is a catastrophic system failure
+            fatalError("Application Support directory unavailable -- macOS system integrity compromised")
+        }
+        return appSupport.appendingPathComponent("Caddie/audio", isDirectory: true)
     }
 
     /// Ensures the audio directory exists.
