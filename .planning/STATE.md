@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 03-01-PLAN.md and 03-02-PLAN.md
-last_updated: "2026-03-21T22:11:32.197Z"
+stopped_at: Completed 04-01-PLAN.md and 04-02-PLAN.md
+last_updated: "2026-03-21T22:55:07.649Z"
 progress:
   total_phases: 9
-  completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
+  completed_phases: 4
+  total_plans: 8
+  completed_plans: 8
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 02 complete -- ready for Phase 03
+**Current focus:** Phase 04 — recording-coordinator
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
+Phase: 04 (recording-coordinator) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -53,6 +53,8 @@ Plan: Not started
 | Phase 02 P03 | 5min | 1 task | 1 file |
 | Phase 03 P01 | 5min | 2 tasks | 3 files |
 | Phase 03 P02 | 5min | 1 tasks | 2 files |
+| Phase 04 P01 | 9min | 1 tasks | 3 files |
+| Phase 04 P02 | 23min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -73,6 +75,9 @@ Recent decisions affecting current work:
 - [Phase 03]: OSMemoryBarrier() for SPSC ring buffer cross-thread visibility instead of swift-atomics
 - [Phase 03]: Retained RenderContext object pattern for C callback lifecycle safety
 - [Phase 03]: 32768 sample ring buffer capacity (~2s at 16kHz) with 100ms DispatchSourceTimer flush
+- [Phase 04]: RecordingCoordinator actor with non-optional deps eliminates init race structurally
+- [Phase 04]: GRDB writes from actor context require try await (async interface)
+- [Phase 04]: AppState thin wrapper: zero recording logic, delegates to coordinator
 
 ### Pending Todos
 
@@ -85,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T22:04:04.212Z
-Stopped at: Completed 03-01-PLAN.md and 03-02-PLAN.md
+Last session: 2026-03-21T22:55:07.646Z
+Stopped at: Completed 04-01-PLAN.md and 04-02-PLAN.md
 Resume file: None
