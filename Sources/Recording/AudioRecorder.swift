@@ -5,6 +5,9 @@ import os
 /// Orchestrates SystemAudioCapture + MicrophoneCapture into a stereo WAV file.
 /// Left channel = system audio, Right channel = microphone.
 /// Both channels are 16kHz 16-bit signed integer PCM.
+///
+/// Audio data flows lock-free from real-time threads:
+///   render callback -> SPSCRingBuffer.write() (no locks) -> flush timer reads on main thread
 final class AudioRecorder {
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AudioRecorder")
@@ -15,13 +18,12 @@ final class AudioRecorder {
     private var audioFile: ExtAudioFileRef?
     private var isRecording = false
 
-    // Thread-safe buffer management
-    private let lock = NSLock()
-    private var systemBuffer: [Int16] = []
-    private var micBuffer: [Int16] = []
-
-    // Flush threshold: ~100ms at 16kHz
-    private static let flushThreshold = 1600
+    // Ring buffers: sized for ~2 seconds of audio at 16kHz (32768 = next power of 2 above 32000)
+    // Producer: real-time audio thread (via callbacks). Consumer: flush timer on main thread.
+    private var systemRingBuffer: SPSCRingBuffer?
+    private var micRingBuffer: SPSCRingBuffer?
+    private var flushTimer: DispatchSourceTimer?
+    private static let ringBufferCapacity = 32768
 
     // Stereo WAV format: 2 channels, 16kHz, 16-bit signed integer PCM
     private static let sampleRate: Float64 = 16000.0
@@ -45,13 +47,20 @@ final class AudioRecorder {
         // Create the stereo WAV file
         try createWAVFile(at: outputPath)
 
-        // Reserve buffer capacity to reduce allocations
-        lock.lock()
-        systemBuffer.reserveCapacity(Self.flushThreshold * 2)
-        micBuffer.reserveCapacity(Self.flushThreshold * 2)
-        lock.unlock()
+        // Create ring buffers
+        systemRingBuffer = SPSCRingBuffer(capacity: Self.ringBufferCapacity)
+        micRingBuffer = SPSCRingBuffer(capacity: Self.ringBufferCapacity)
 
         isRecording = true
+
+        // Set up a flush timer on the main queue (100ms interval)
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            self?.flushRingBuffers()
+        }
+        timer.resume()
+        flushTimer = timer
 
         // Start system audio capture
         do {
@@ -61,7 +70,7 @@ final class AudioRecorder {
         } catch {
             logger.error("Failed to start system audio capture: \(error.localizedDescription)")
             logger.warning("Recording will continue with microphone only (system channel will be silence)")
-            // Continue without system audio — microphone-only recording is still useful
+            // Continue without system audio -- microphone-only recording is still useful
         }
 
         // Start microphone capture
@@ -80,16 +89,21 @@ final class AudioRecorder {
         systemCapture.stop()
         micCapture.stop()
 
-        // Final flush of remaining samples
-        lock.lock()
-        flushBuffers(final: true)
-        lock.unlock()
+        // Cancel the flush timer
+        flushTimer?.cancel()
+        flushTimer = nil
+
+        // Final flush of any remaining samples
+        flushRingBuffersFinal()
 
         // Close the audio file
         if let file = audioFile {
             ExtAudioFileDispose(file)
             audioFile = nil
         }
+
+        systemRingBuffer = nil
+        micRingBuffer = nil
 
         logger.info("AudioRecorder stopped")
     }
@@ -126,63 +140,93 @@ final class AudioRecorder {
         self.audioFile = audioFile
     }
 
-    // MARK: - Buffer Handling
+    // MARK: - Buffer Handling (lock-free)
 
     private func handleSystemAudioBuffer(_ buffer: UnsafeBufferPointer<Int16>, count: Int) {
         guard isRecording else { return }
-        lock.lock()
-        systemBuffer.append(contentsOf: buffer)
-        flushIfReady()
-        lock.unlock()
+        // Lock-free write -- safe on real-time audio thread
+        let written = systemRingBuffer?.write(buffer, count: count) ?? 0
+        if written < count {
+            logger.warning("System audio ring buffer overflow: dropped \(count - written) samples")
+        }
     }
 
     private func handleMicBuffer(_ buffer: UnsafeBufferPointer<Int16>, count: Int) {
         guard isRecording else { return }
-        lock.lock()
-        micBuffer.append(contentsOf: buffer)
-        flushIfReady()
-        lock.unlock()
-    }
-
-    private func flushIfReady() {
-        // Both buffers need at least flushThreshold samples
-        if systemBuffer.count >= Self.flushThreshold && micBuffer.count >= Self.flushThreshold {
-            flushBuffers(final: false)
+        // Lock-free write -- safe on real-time audio thread
+        let written = micRingBuffer?.write(buffer, count: count) ?? 0
+        if written < count {
+            logger.warning("Mic ring buffer overflow: dropped \(count - written) samples")
         }
     }
 
-    /// Interleave system and mic samples and write to the WAV file.
-    /// Must be called with lock held.
-    private func flushBuffers(final: Bool) {
-        // Determine how many frames we can write
-        let frameCount: Int
-        if final {
-            // On final flush, write all available frames, padding the shorter buffer with silence
-            frameCount = max(systemBuffer.count, micBuffer.count)
-        } else {
-            // Normal flush: only write complete pairs
-            frameCount = min(systemBuffer.count, micBuffer.count)
-        }
+    // MARK: - Flush (main thread)
 
+    /// Periodic flush: reads the minimum of both ring buffers to maintain stereo sync.
+    private func flushRingBuffers() {
+        guard let systemRB = systemRingBuffer, let micRB = micRingBuffer else { return }
+
+        let systemAvailable = systemRB.availableToRead
+        let micAvailable = micRB.availableToRead
+
+        // Flush the minimum of both to maintain stereo sync
+        let frameCount = min(systemAvailable, micAvailable)
         guard frameCount > 0 else { return }
 
-        // Interleave: [system0, mic0, system1, mic1, ...]
-        var interleaved = [Int16](repeating: 0, count: frameCount * 2)
-        for i in 0..<frameCount {
-            let systemSample = i < systemBuffer.count ? systemBuffer[i] : 0
-            let micSample = i < micBuffer.count ? micBuffer[i] : 0
-            interleaved[i * 2] = systemSample
-            interleaved[i * 2 + 1] = micSample
+        let systemSamples = UnsafeMutablePointer<Int16>.allocate(capacity: frameCount)
+        let micSamples = UnsafeMutablePointer<Int16>.allocate(capacity: frameCount)
+        defer {
+            systemSamples.deallocate()
+            micSamples.deallocate()
         }
 
-        // Remove consumed samples from buffers
-        let systemConsumed = min(frameCount, systemBuffer.count)
-        let micConsumed = min(frameCount, micBuffer.count)
-        systemBuffer.removeFirst(systemConsumed)
-        micBuffer.removeFirst(micConsumed)
+        let systemRead = systemRB.read(into: systemSamples, count: frameCount)
+        let micRead = micRB.read(into: micSamples, count: frameCount)
+        let actualFrames = min(systemRead, micRead)
+        guard actualFrames > 0 else { return }
 
-        // Write to the audio file
-        writeToFile(interleaved: interleaved, frameCount: UInt32(frameCount))
+        // Interleave: [system0, mic0, system1, mic1, ...]
+        var interleaved = [Int16](repeating: 0, count: actualFrames * 2)
+        for i in 0..<actualFrames {
+            interleaved[i * 2] = systemSamples[i]
+            interleaved[i * 2 + 1] = micSamples[i]
+        }
+
+        writeToFile(interleaved: interleaved, frameCount: UInt32(actualFrames))
+    }
+
+    /// Final flush: drains all remaining samples, padding the shorter channel with silence.
+    private func flushRingBuffersFinal() {
+        guard let systemRB = systemRingBuffer, let micRB = micRingBuffer else { return }
+
+        let systemAvailable = systemRB.availableToRead
+        let micAvailable = micRB.availableToRead
+        let frameCount = max(systemAvailable, micAvailable)
+        guard frameCount > 0 else { return }
+
+        let systemSamples = UnsafeMutablePointer<Int16>.allocate(capacity: frameCount)
+        let micSamples = UnsafeMutablePointer<Int16>.allocate(capacity: frameCount)
+        defer {
+            systemSamples.deallocate()
+            micSamples.deallocate()
+        }
+
+        // Initialize to silence
+        systemSamples.initialize(repeating: 0, count: frameCount)
+        micSamples.initialize(repeating: 0, count: frameCount)
+
+        let systemRead = systemRB.read(into: systemSamples, count: frameCount)
+        let micRead = micRB.read(into: micSamples, count: frameCount)
+        let actualFrames = max(systemRead, micRead)
+        guard actualFrames > 0 else { return }
+
+        var interleaved = [Int16](repeating: 0, count: actualFrames * 2)
+        for i in 0..<actualFrames {
+            interleaved[i * 2] = (i < systemRead) ? systemSamples[i] : 0
+            interleaved[i * 2 + 1] = (i < micRead) ? micSamples[i] : 0
+        }
+
+        writeToFile(interleaved: interleaved, frameCount: UInt32(actualFrames))
     }
 
     private func writeToFile(interleaved: [Int16], frameCount: UInt32) {
