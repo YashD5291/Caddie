@@ -1,7 +1,10 @@
 import Foundation
 import AudioToolbox
+import os
 
 enum AudioFileManager {
+    private static let logger = CaddieLogger.storage
+
     /// Base directory for all audio files.
     static var audioDirectory: URL {
         let appSupport = FileManager.default.urls(
@@ -221,10 +224,11 @@ enum AudioFileManager {
     /// Finds orphaned WAV files (WAV files in audio directory that were not cleaned up).
     static func findOrphanedWAVs() -> [URL] {
         let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(
-            at: audioDirectory,
-            includingPropertiesForKeys: nil
-        ) else {
+        let contents: [URL]
+        do {
+            contents = try fm.contentsOfDirectory(at: audioDirectory, includingPropertiesForKeys: nil)
+        } catch {
+            logger.warning("Failed to enumerate audio directory: \(error.localizedDescription)")
             return []
         }
         return contents.filter { $0.pathExtension.lowercased() == "wav" }
@@ -235,21 +239,33 @@ enum AudioFileManager {
         let fm = FileManager.default
         let wav = wavPath(for: meetingId)
         let m4a = alacPath(for: meetingId)
-        try? fm.removeItem(at: wav)
-        try? fm.removeItem(at: m4a)
+        do { try fm.removeItem(at: wav) } catch {
+            logger.warning("Failed to delete WAV for \(meetingId): \(error.localizedDescription)")
+        }
+        do { try fm.removeItem(at: m4a) } catch {
+            logger.warning("Failed to delete M4A for \(meetingId): \(error.localizedDescription)")
+        }
     }
 
     /// Returns total bytes used by all files in the audio directory.
     static func totalStorageUsed() -> UInt64 {
         let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(
-            at: audioDirectory,
-            includingPropertiesForKeys: [.fileSizeKey]
-        ) else {
+        let contents: [URL]
+        do {
+            contents = try fm.contentsOfDirectory(at: audioDirectory, includingPropertiesForKeys: [.fileSizeKey])
+        } catch {
+            logger.warning("Failed to enumerate audio directory for storage calculation: \(error.localizedDescription)")
             return 0
         }
         return contents.reduce(0) { total, url in
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+            let size: Int = {
+                do {
+                    return try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                } catch {
+                    logger.warning("Failed to read file size for \(url.lastPathComponent): \(error.localizedDescription)")
+                    return 0
+                }
+            }()
             return total + UInt64(size)
         }
     }

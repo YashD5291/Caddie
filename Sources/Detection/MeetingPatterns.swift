@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - MeetingApp
 
@@ -20,7 +21,13 @@ struct MeetingApp {
         self.processNames = processNames
         self.bundleIds = bundleIds
         self.titlePatterns = titlePatterns.compactMap { pattern in
-            try? NSRegularExpression(pattern: pattern, options: [])
+            do {
+                return try NSRegularExpression(pattern: pattern, options: [])
+            } catch {
+                let logger = Logger(subsystem: "com.caddie.app", category: "MeetingPatterns")
+                logger.error("Invalid regex pattern '\(pattern)' for app \(name): \(error.localizedDescription)")
+                return nil
+            }
         }
         self.isBrowserBased = isBrowserBased
     }
@@ -47,7 +54,7 @@ enum MeetingPatterns {
             name: "Google Meet",
             processNames: [],
             bundleIds: [],
-            titlePatterns: ["^Meet\\s*[-–—]\\s*"],
+            titlePatterns: ["^Meet\\s*[-\u{2013}\u{2014}]\\s*"],
             isBrowserBased: true
         ),
         MeetingApp(
@@ -148,7 +155,7 @@ enum MeetingPatterns {
 
         case "Google Meet":
             // Remove "Meet - " prefix
-            if let range = title.range(of: #"^Meet\s*[-–—]\s*"#, options: .regularExpression) {
+            if let range = title.range(of: #"^Meet\s*[-\u{2013}\u{2014}]\s*"#, options: .regularExpression) {
                 title.removeSubrange(range)
             }
             // Remove "- Google Meet" suffix

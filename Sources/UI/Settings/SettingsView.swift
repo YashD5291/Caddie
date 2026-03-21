@@ -1,6 +1,8 @@
 import SwiftUI
 import ServiceManagement
 
+private let settingsLogger = CaddieLogger.app
+
 struct SettingsView: View {
     @State private var launchAtLogin = false
     @State private var gracePeriod: Double = 10
@@ -96,17 +98,25 @@ struct SettingsView: View {
             }
 
             Button("Show in Finder") {
-                let appSupport = FileManager.default.urls(
+                guard let appSupport = FileManager.default.urls(
                     for: .applicationSupportDirectory,
                     in: .userDomainMask
-                ).first!.appendingPathComponent("Caddie", isDirectory: true)
-                NSWorkspace.shared.open(appSupport)
+                ).first else {
+                    settingsLogger.error("Application Support directory not found")
+                    return
+                }
+                let caddieDir = appSupport.appendingPathComponent("Caddie", isDirectory: true)
+                NSWorkspace.shared.open(caddieDir)
             }
 
             Button("Clean Up Orphaned Files") {
                 let orphans = AudioFileManager.findOrphanedWAVs()
                 for url in orphans {
-                    try? FileManager.default.removeItem(at: url)
+                    do {
+                        try FileManager.default.removeItem(at: url)
+                    } catch {
+                        settingsLogger.warning("Failed to remove orphaned file \(url.lastPathComponent): \(error.localizedDescription)")
+                    }
                 }
                 refreshStorage()
             }

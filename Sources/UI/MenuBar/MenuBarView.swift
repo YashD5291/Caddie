@@ -1,6 +1,8 @@
 import SwiftUI
 import GRDB
 
+private let menuBarLogger = CaddieLogger.app
+
 struct MenuBarView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.openWindow) private var openWindow
@@ -96,12 +98,17 @@ struct MenuBarView: View {
 
     private func fetchRecentMeetings() -> [Meeting] {
         guard let db = appState.database else { return [] }
-        return (try? db.dbWriter.read { dbConn in
-            try Meeting
-                .order(Column("created_at").desc)
-                .limit(3)
-                .fetchAll(dbConn)
-        }) ?? []
+        do {
+            return try db.dbWriter.read { dbConn in
+                try Meeting
+                    .order(Column("created_at").desc)
+                    .limit(3)
+                    .fetchAll(dbConn)
+            }
+        } catch {
+            menuBarLogger.warning("Failed to fetch recent meetings: \(error.localizedDescription)")
+            return []
+        }
     }
 
     private func menuLabel(for meeting: Meeting) -> String {

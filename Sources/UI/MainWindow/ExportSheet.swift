@@ -1,6 +1,8 @@
 import SwiftUI
 import AppKit
 
+private let exportLogger = CaddieLogger.app
+
 // MARK: - ExportFormatter
 
 enum ExportFormatter {
@@ -69,8 +71,15 @@ struct ExportSheet: View {
 
     private func exportAs(format: ExportFormat) {
         guard let transcriptJSON = meeting.transcript,
-              let data = transcriptJSON.data(using: .utf8),
-              let transcript = try? JSONDecoder().decode(Transcript.self, from: data) else { return }
+              let data = transcriptJSON.data(using: .utf8) else { return }
+
+        let transcript: Transcript
+        do {
+            transcript = try JSONDecoder().decode(Transcript.self, from: data)
+        } catch {
+            exportLogger.error("Failed to decode transcript for export: \(error.localizedDescription)")
+            return
+        }
 
         let content: String
         let fileExtension: String
@@ -83,7 +92,11 @@ struct ExportSheet: View {
         panel.nameFieldStringValue = "\(meeting.title).\(fileExtension)"
         panel.allowedContentTypes = [.plainText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? content.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            exportLogger.error("Failed to write export file: \(error.localizedDescription)")
+        }
         dismiss()
     }
 }

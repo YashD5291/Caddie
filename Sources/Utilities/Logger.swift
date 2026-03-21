@@ -16,7 +16,12 @@ enum CaddieLogger {
             .appendingPathComponent("Library/Logs/Caddie", isDirectory: true)
 
         // Create the directory if it doesn't exist so Finder has something to open
-        try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+        } catch {
+            // Cannot use CaddieLogger here (circular) -- fall back to print
+            print("[CaddieLogger] Failed to create logs directory: \(error.localizedDescription)")
+        }
 
         NSWorkspace.shared.open(logsDir)
     }

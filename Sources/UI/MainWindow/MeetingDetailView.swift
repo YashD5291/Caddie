@@ -1,5 +1,7 @@
 import SwiftUI
 
+private let detailLogger = CaddieLogger.app
+
 struct MeetingDetailView: View {
     @Environment(AppState.self) private var appState
     let meeting: Meeting
@@ -194,7 +196,12 @@ struct MeetingDetailView: View {
     private var decodedTranscript: Transcript? {
         guard let json = meeting.transcript,
               let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(Transcript.self, from: data)
+        do {
+            return try JSONDecoder().decode(Transcript.self, from: data)
+        } catch {
+            detailLogger.warning("Failed to decode transcript JSON for meeting \(meeting.meetingId): \(error.localizedDescription)")
+            return nil
+        }
     }
 
     private func deleteMeeting() {

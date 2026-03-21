@@ -62,7 +62,11 @@ actor TranscriptionPipeline {
 
             defer {
                 // Clean up temp mono file after ASR + diarization
-                try? FileManager.default.removeItem(at: monoURL)
+                do {
+                    try FileManager.default.removeItem(at: monoURL)
+                } catch {
+                    logger.warning("Failed to remove mono temp file \(monoURL.lastPathComponent): \(error.localizedDescription)")
+                }
             }
 
             // Step 2: ASR
@@ -118,7 +122,11 @@ actor TranscriptionPipeline {
             await updateMeetingStatus(meetingId: meetingId, status: .done, database: database)
 
             // Step 8: Delete stereo WAV (AFTER status is .done so retry is still possible on failure)
-            try? FileManager.default.removeItem(at: wavURL)
+            do {
+                try FileManager.default.removeItem(at: wavURL)
+            } catch {
+                logger.warning("Failed to remove stereo WAV \(wavURL.lastPathComponent): \(error.localizedDescription)")
+            }
             logger.info("[\(meetingId)] Stereo WAV deleted")
 
             logger.info("[\(meetingId)] Pipeline complete in \(String(format: "%.1f", processingTime))s")
