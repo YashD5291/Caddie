@@ -18,9 +18,18 @@ final class SystemAudioCapture {
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "SystemAudioCapture")
 
-    // These are fileprivate so the render callback (a free function in this file) can access them
-    fileprivate var audioUnit: AudioComponentInstance?
-    fileprivate var onBuffer: BufferCallback?
+    /// Retained context object passed to the render callback via Unmanaged.passRetained.
+    /// Eliminates use-after-free risk: the context is retained independently of `self`,
+    /// so even if SystemAudioCapture is deallocated during an in-flight callback,
+    /// the callback accesses valid memory.
+    fileprivate final class RenderContext {
+        var audioUnit: AudioComponentInstance?
+        var onBuffer: BufferCallback?
+    }
+
+    private var audioUnit: AudioComponentInstance?
+    private var onBuffer: BufferCallback?
+    private var renderContext: RenderContext?
 
     private var aggregateDeviceID: AudioDeviceID = kAudioObjectUnknown
     private var tapObjectID: AudioObjectID = kAudioObjectUnknown
@@ -68,6 +77,15 @@ final class SystemAudioCapture {
             AudioUnitUninitialize(unit)
             AudioComponentInstanceDispose(unit)
             audioUnit = nil
+        }
+
+        // Nil out context fields to prevent further callback activity,
+        // then release the retained reference we passed to the render callback.
+        if let ctx = renderContext {
+            ctx.audioUnit = nil
+            ctx.onBuffer = nil
+            Unmanaged.passUnretained(ctx).release()
+            renderContext = nil
         }
 
         destroyAggregateDevice()
@@ -281,10 +299,17 @@ final class SystemAudioCapture {
             throw CaptureError.failedToSetFormat(status)
         }
 
-        // Set the render callback
+        // Set the render callback via a retained context object.
+        // The context holds references the callback needs (audioUnit, onBuffer),
+        // avoiding Unmanaged.passUnretained(self) which risks use-after-free.
+        let context = RenderContext()
+        context.audioUnit = audioUnit
+        context.onBuffer = onBuffer
+        self.renderContext = context
+
         var callbackStruct = AURenderCallbackStruct(
             inputProc: systemAudioRenderCallback,
-            inputProcRefCon: Unmanaged.passUnretained(self).toOpaque()
+            inputProcRefCon: Unmanaged.passRetained(context).toOpaque()
         )
 
         status = AudioUnitSetProperty(
@@ -324,6 +349,14 @@ final class SystemAudioCapture {
             AudioComponentInstanceDispose(unit)
             audioUnit = nil
         }
+
+        if let ctx = renderContext {
+            ctx.audioUnit = nil
+            ctx.onBuffer = nil
+            Unmanaged.passUnretained(ctx).release()
+            renderContext = nil
+        }
+
         destroyAggregateDevice()
         destroyTap()
         onBuffer = nil
@@ -385,6 +418,9 @@ final class SystemAudioCapture {
 /// The render callback is invoked by the AudioUnit on the real-time audio thread.
 /// It pulls samples from the aggregate device (which includes our tap) and forwards
 /// them as Int16 buffers to the Swift callback.
+///
+/// Uses a retained RenderContext instead of Unmanaged<SystemAudioCapture> to avoid
+/// use-after-free when SystemAudioCapture is deallocated during an in-flight callback.
 private func systemAudioRenderCallback(
     inRefCon: UnsafeMutableRawPointer,
     ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
@@ -393,9 +429,9 @@ private func systemAudioRenderCallback(
     inNumberFrames: UInt32,
     ioData: UnsafeMutablePointer<AudioBufferList>?
 ) -> OSStatus {
-    let capture = Unmanaged<SystemAudioCapture>.fromOpaque(inRefCon).takeUnretainedValue()
+    let context = Unmanaged<SystemAudioCapture.RenderContext>.fromOpaque(inRefCon).takeUnretainedValue()
 
-    guard let unit = capture.audioUnit else { return noErr }
+    guard let unit = context.audioUnit else { return noErr }
 
     // Allocate a buffer for the rendered data
     let byteSize = Int(inNumberFrames) * MemoryLayout<Int16>.size
@@ -425,7 +461,7 @@ private func systemAudioRenderCallback(
     // Forward the Int16 samples to the callback
     let sampleCount = Int(inNumberFrames)
     let bufferPtr = UnsafeBufferPointer(start: buffer, count: sampleCount)
-    capture.onBuffer?(bufferPtr, sampleCount)
+    context.onBuffer?(bufferPtr, sampleCount)
 
     return noErr
 }
