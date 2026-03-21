@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 04-01-PLAN.md and 04-02-PLAN.md
-last_updated: "2026-03-21T22:55:07.649Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-03-21T23:33:46.673Z"
 progress:
   total_phases: 9
   completed_phases: 4
-  total_plans: 8
-  completed_plans: 8
+  total_plans: 9
+  completed_plans: 9
 ---
 
 # Project State
@@ -55,6 +55,7 @@ Plan: 2 of 2
 | Phase 03 P02 | 5min | 1 tasks | 2 files |
 | Phase 04 P01 | 9min | 1 tasks | 3 files |
 | Phase 04 P02 | 23min | 2 tasks | 4 files |
+| Phase 04 P03 | 22min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,8 @@ Recent decisions affecting current work:
 - [Phase 04]: RecordingCoordinator actor with non-optional deps eliminates init race structurally
 - [Phase 04]: GRDB writes from actor context require try await (async interface)
 - [Phase 04]: AppState thin wrapper: zero recording logic, delegates to coordinator
+- [Phase 04]: onComplete callback with @Sendable Result type for cross-actor pipeline-to-coordinator communication
+- [Phase 04]: [self] capture in actor closures -- actors don't support weak references
 
 ### Pending Todos
 
@@ -90,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T22:55:07.646Z
-Stopped at: Completed 04-01-PLAN.md and 04-02-PLAN.md
+Last session: 2026-03-21T23:33:46.670Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None

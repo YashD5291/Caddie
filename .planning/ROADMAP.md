@@ -80,7 +80,7 @@ Plans:
 Plans:
 - [x] 04-01-PLAN.md -- RecordingState enum with pure state machine (TDD: state/event/sideEffect types + exhaustive transition tests)
 - [x] 04-02-PLAN.md -- RecordingCoordinator actor + AppState refactor to thin observable wrapper
-- [ ] 04-03-PLAN.md -- Gap closure: wire pipeline completion callback to coordinator state machine
+- [x] 04-03-PLAN.md -- Gap closure: wire pipeline completion callback to coordinator state machine
 
 ### Phase 5: Pipeline Data Integrity
 **Goal**: No transcript is ever lost due to premature file deletion, failed DB writes, or concurrent processing bugs
