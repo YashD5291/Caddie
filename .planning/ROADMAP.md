@@ -45,12 +45,12 @@ Plans:
   1. Tests run without downloading ML models or requiring FluidAudio at link time
   2. Database migration tests verify schema integrity for both fresh install and upgrade paths
   3. Pipeline error path tests cover at least: enqueue failure, transcription failure, concurrent enqueue rejection, and state transition validation
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
-- [ ] 02-03: TBD
+- [ ] 02-01-PLAN.md -- Extract ASREngineProtocol/DiarizationEngineProtocol, refactor pipeline to protocols, create mocks, remove FluidAudio from test target
+- [ ] 02-02-PLAN.md -- Database migration tests (schema, constraints, indexes, FTS5 triggers, idempotency)
+- [ ] 02-03-PLAN.md -- Pipeline error path tests (ASR/diarization failure, concurrent enqueue, status transitions)
 
 ### Phase 3: Audio Thread Safety
 **Goal**: The real-time audio render callback cannot crash the app or cause priority inversion
@@ -171,8 +171,8 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Test Target Revival | 0/1 | Not started | - |
-| 2. Test Infrastructure | 0/TBD | Not started | - |
+| 1. Test Target Revival | 1/1 | Complete | 2026-03-22 |
+| 2. Test Infrastructure | 0/3 | Planned | - |
 | 3. Audio Thread Safety | 0/2 | Not started | - |
 | 4. Recording Coordinator | 0/TBD | Not started | - |
 | 5. Pipeline Data Integrity | 0/TBD | Not started | - |
