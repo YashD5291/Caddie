@@ -8,7 +8,8 @@ options:
 
 settings:
   base:
-    SWIFT_VERSION: "5.9"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
     MACOSX_DEPLOYMENT_TARGET: "14.2"
     CODE_SIGN_IDENTITY: "-"
     PRODUCT_BUNDLE_IDENTIFIER: com.caddie.app
@@ -66,3 +67,17 @@ targets:
       - target: Caddie
       - package: GRDB
       - package: FluidAudio
+
+schemes:
+  Caddie:
+    build:
+      targets:
+        Caddie: all
+    run:
+      config: Debug
+    test:
+      gatherCoverageData: true
+      coverageTargets:
+        - Caddie
+      targets:
+        - CaddieTests
