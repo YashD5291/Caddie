@@ -60,11 +60,11 @@ Plans:
   1. Audio render callback uses a lock-free ring buffer -- no locks of any kind on the real-time thread
   2. SystemAudioCapture render callback does not use Unmanaged.passUnretained of self (no use-after-free risk)
   3. Recording a 30+ minute meeting produces correct audio without glitches caused by priority inversion
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
+- [ ] 03-01-PLAN.md -- Lock-free SPSC ring buffer + Unmanaged use-after-free fix in SystemAudioCapture
+- [ ] 03-02-PLAN.md -- Replace NSLock in AudioRecorder with SPSCRingBuffer + flush timer
 
 ### Phase 4: Recording Coordinator
 **Goal**: Recording lifecycle is managed by a single actor with explicit state machine -- not scattered across AppState
@@ -173,7 +173,7 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 |-------|----------------|--------|-----------|
 | 1. Test Target Revival | 0/1 | Not started | - |
 | 2. Test Infrastructure | 0/TBD | Not started | - |
-| 3. Audio Thread Safety | 0/TBD | Not started | - |
+| 3. Audio Thread Safety | 0/2 | Not started | - |
 | 4. Recording Coordinator | 0/TBD | Not started | - |
 | 5. Pipeline Data Integrity | 0/TBD | Not started | - |
 | 6. Error Discipline | 0/TBD | Not started | - |
