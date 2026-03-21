@@ -32,11 +32,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. `xcodebuild test` completes without linker errors against the Caddie test target
   2. All existing test files (10) compile and their tests execute (pass or fail -- execution is the bar, not green)
   3. Swift version is 6.0+ and strict concurrency checking is enabled
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
+- [ ] 01-01-PLAN.md -- Update project.yml (Swift 6.0, coverageTargets, strict concurrency) and verify tests execute
 
 ### Phase 2: Test Infrastructure
 **Goal**: ML engines and database are testable in isolation without hardware or model dependencies
@@ -172,7 +171,7 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Test Target Revival | 0/TBD | Not started | - |
+| 1. Test Target Revival | 0/1 | Not started | - |
 | 2. Test Infrastructure | 0/TBD | Not started | - |
 | 3. Audio Thread Safety | 0/TBD | Not started | - |
 | 4. Recording Coordinator | 0/TBD | Not started | - |
