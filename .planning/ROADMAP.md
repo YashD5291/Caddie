@@ -92,12 +92,12 @@ Plans:
   3. Mono temp file is deleted only after both ASR and diarization consumers finish (not via defer)
   4. WAV file is deleted only after ALAC compression succeeds AND transcript is persisted to DB
   5. On app startup, orphaned caddie_mono_* temp files from previous sessions are cleaned up
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 05-01: TBD
-- [ ] 05-02: TBD
-- [ ] 05-03: TBD
+- [ ] 05-01-PLAN.md -- Restructure processNext() file lifecycle: remove defer, gate deletion on success (DATA-02, DATA-03, DATA-04)
+- [ ] 05-02-PLAN.md -- Pipeline entry guards: duplicate rejection, bounded queue, retry safety (DATA-06, DATA-07, DATA-08)
+- [ ] 05-03-PLAN.md -- Orphaned temp file cleanup on startup + DB insert failure verification (DATA-01, DATA-05)
 
 ### Phase 6: Error Discipline
 **Goal**: Every error in the codebase is explicitly handled and logged -- no silent swallowing
@@ -122,10 +122,10 @@ Plans:
   1. Recording refuses to start and shows an alert if available disk space is below 500MB
   2. Model download during onboarding times out after 5 minutes with a clear error message and retry option
   3. Both precondition failures are recoverable -- user can free space or retry download and proceed
-**Plans**: 1 plan
+**Plans**: TBD
 
 Plans:
-- [ ] 07-01-PLAN.md -- Disk space guard in RecordingCoordinator + model download timeout in ModelManager
+- [ ] 07-01: TBD
 
 ### Phase 8: User Feedback
 **Goal**: Users always know what Caddie is doing -- recording status, transcription progress, and completion are visible
@@ -174,9 +174,9 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 | 1. Test Target Revival | 1/1 | Complete | 2026-03-22 |
 | 2. Test Infrastructure | 3/3 | Complete | 2026-03-22 |
 | 3. Audio Thread Safety | 2/2 | Complete | 2026-03-22 |
-| 4. Recording Coordinator | 2/3 | In progress | - |
-| 5. Pipeline Data Integrity | 0/TBD | Not started | - |
+| 4. Recording Coordinator | 3/3 | Complete | 2026-03-22 |
+| 5. Pipeline Data Integrity | 0/3 | Not started | - |
 | 6. Error Discipline | 0/TBD | Not started | - |
-| 7. Precondition Guards | 0/1 | Not started | - |
+| 7. Precondition Guards | 0/TBD | Not started | - |
 | 8. User Feedback | 0/TBD | Not started | - |
 | 9. Recording Resilience | 0/TBD | Not started | - |
