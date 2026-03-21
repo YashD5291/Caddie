@@ -87,4 +87,32 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmapper) | | |
+| BUILD-01 | Phase 1: Test Target Revival | Pending |
+| BUILD-02 | Phase 1: Test Target Revival | Pending |
+| BUILD-03 | Phase 2: Test Infrastructure | Pending |
+| BUILD-04 | Phase 2: Test Infrastructure | Pending |
+| BUILD-05 | Phase 2: Test Infrastructure | Pending |
+| REC-01 | Phase 3: Audio Thread Safety | Pending |
+| REC-02 | Phase 3: Audio Thread Safety | Pending |
+| REC-03 | Phase 4: Recording Coordinator | Pending |
+| REC-04 | Phase 4: Recording Coordinator | Pending |
+| REC-05 | Phase 9: Recording Resilience | Pending |
+| REC-06 | Phase 9: Recording Resilience | Pending |
+| DATA-01 | Phase 5: Pipeline Data Integrity | Pending |
+| DATA-02 | Phase 5: Pipeline Data Integrity | Pending |
+| DATA-03 | Phase 5: Pipeline Data Integrity | Pending |
+| DATA-04 | Phase 5: Pipeline Data Integrity | Pending |
+| DATA-05 | Phase 5: Pipeline Data Integrity | Pending |
+| DATA-06 | Phase 5: Pipeline Data Integrity | Pending |
+| DATA-07 | Phase 5: Pipeline Data Integrity | Pending |
+| DATA-08 | Phase 5: Pipeline Data Integrity | Pending |
+| ERR-01 | Phase 6: Error Discipline | Pending |
+| ERR-02 | Phase 6: Error Discipline | Pending |
+| ERR-03 | Phase 6: Error Discipline | Pending |
+| ERR-04 | Phase 6: Error Discipline | Pending |
+| ERR-05 | Phase 7: Precondition Guards | Pending |
+| ERR-06 | Phase 7: Precondition Guards | Pending |
+| UX-01 | Phase 8: User Feedback | Pending |
+| UX-02 | Phase 8: User Feedback | Pending |
+| UX-03 | Phase 8: User Feedback | Pending |
+| UX-04 | Phase 8: User Feedback | Pending |
