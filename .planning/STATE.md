@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-03-21T22:03:38.998Z"
+stopped_at: Completed 03-01-PLAN.md and 03-02-PLAN.md
+last_updated: "2026-03-21T22:04:04.215Z"
 progress:
   total_phases: 9
   completed_phases: 3
@@ -70,6 +70,9 @@ Recent decisions affecting current work:
 - [Phase 02]: Used 'any ASREngineProtocol' (existential) not 'some' (opaque) -- actors require existential types for stored protocol properties
 - [Phase 02]: @MainActor required on async XCTestCase subclasses for Swift 6 test discovery
 - [Phase 02]: Polling-based async wait pattern for pipeline tests (100ms intervals, 10s timeout)
+- [Phase 03]: OSMemoryBarrier() for SPSC ring buffer cross-thread visibility instead of swift-atomics
+- [Phase 03]: Retained RenderContext object pattern for C callback lifecycle safety
+- [Phase 03]: 32768 sample ring buffer capacity (~2s at 16kHz) with 100ms DispatchSourceTimer flush
 
 ### Pending Todos
 
@@ -82,6 +85,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T21:57:47.000Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-03-21T22:04:04.212Z
+Stopped at: Completed 03-01-PLAN.md and 03-02-PLAN.md
 Resume file: None

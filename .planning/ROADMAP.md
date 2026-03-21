@@ -63,8 +63,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md -- Lock-free SPSC ring buffer + Unmanaged use-after-free fix in SystemAudioCapture
-- [ ] 03-02-PLAN.md -- Replace NSLock in AudioRecorder with SPSCRingBuffer + flush timer
+- [x] 03-01-PLAN.md -- Lock-free SPSC ring buffer + Unmanaged use-after-free fix in SystemAudioCapture
+- [x] 03-02-PLAN.md -- Replace NSLock in AudioRecorder with SPSCRingBuffer + flush timer
 
 ### Phase 4: Recording Coordinator
 **Goal**: Recording lifecycle is managed by a single actor with explicit state machine -- not scattered across AppState

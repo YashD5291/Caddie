@@ -17,8 +17,8 @@ Requirements for production-solid release. Each maps to roadmap phases.
 
 ### Recording Core Safety
 
-- [ ] **REC-01**: Audio render callback uses lock-free ring buffer instead of NSLock (no priority inversion on real-time thread)
-- [ ] **REC-02**: SystemAudioCapture render callback safe from use-after-free (no Unmanaged.passUnretained of self)
+- [x] **REC-01**: Audio render callback uses lock-free ring buffer instead of NSLock (no priority inversion on real-time thread)
+- [x] **REC-02**: SystemAudioCapture render callback safe from use-after-free (no Unmanaged.passUnretained of self)
 - [ ] **REC-03**: Recording lifecycle managed by a RecordingCoordinator actor with explicit state machine (idle → recording → transcribing → done/error)
 - [ ] **REC-04**: AppState initialization race condition eliminated (pipeline guaranteed ready before meeting lifecycle events fire)
 - [ ] **REC-05**: CoreAudio device disconnection detected mid-recording with graceful stop and user notification
@@ -92,8 +92,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BUILD-03 | Phase 2: Test Infrastructure | Pending |
 | BUILD-04 | Phase 2: Test Infrastructure | Pending |
 | BUILD-05 | Phase 2: Test Infrastructure | Pending |
-| REC-01 | Phase 3: Audio Thread Safety | Pending |
-| REC-02 | Phase 3: Audio Thread Safety | Pending |
+| REC-01 | Phase 3: Audio Thread Safety | Complete |
+| REC-02 | Phase 3: Audio Thread Safety | Complete |
 | REC-03 | Phase 4: Recording Coordinator | Pending |
 | REC-04 | Phase 4: Recording Coordinator | Pending |
 | REC-05 | Phase 9: Recording Resilience | Pending |
