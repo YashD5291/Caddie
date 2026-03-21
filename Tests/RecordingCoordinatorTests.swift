@@ -157,6 +157,101 @@ final class RecordingCoordinatorTests: XCTestCase {
         }
     }
 
+    // MARK: - Pipeline Completion Callback Transitions
+
+    func testTranscriptionCompleteTransitionsToIdle() async {
+        let coordinator = makeCoordinator()
+
+        // Drive to .transcribing: idle -> recording -> meetingEnded -> transcribing
+        await coordinator.handle(.meetingDetected(makeMeeting()))
+        await coordinator.handle(.meetingEnded)
+
+        let transcribingState = await coordinator.state
+        guard case .transcribing(let meetingId) = transcribingState else {
+            XCTFail("Expected .transcribing state, got \(transcribingState)")
+            return
+        }
+
+        // Directly send transcriptionComplete event (tests the pure state transition
+        // that the onComplete callback dispatches on success)
+        await coordinator.handle(.transcriptionComplete(meetingId: meetingId))
+
+        let finalState = await coordinator.state
+        XCTAssertEqual(finalState, .idle, "Coordinator should transition to .idle after transcriptionComplete")
+    }
+
+    func testTranscriptionFailedTransitionsToError() async throws {
+        // Stub ASR to fail so the pipeline calls onComplete with .failure
+        mockASR.stubbedError = CoordinatorTestError.sample
+        let coordinator = makeCoordinator()
+
+        await coordinator.handle(.meetingDetected(makeMeeting()))
+        let recordingState = await coordinator.state
+        guard case .recording(let meetingId) = recordingState else {
+            XCTFail("Expected .recording state")
+            return
+        }
+
+        await coordinator.handle(.meetingEnded)
+
+        // Wait for pipeline failure callback to transition to .error
+        let start = Date()
+        var finalState = await coordinator.state
+        while Date().timeIntervalSince(start) < 10.0 {
+            finalState = await coordinator.state
+            if case .error = finalState { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+
+        guard case .error(let errorMeetingId, _) = finalState else {
+            XCTFail("Expected .error state after pipeline failure, got \(finalState)")
+            return
+        }
+        XCTAssertEqual(errorMeetingId, meetingId, "Error state should reference the correct meeting")
+    }
+
+    func testRetryWithCompletionCallback() async throws {
+        let coordinator = makeCoordinator()
+
+        // Drive to .error state via recording -> recordingFailed
+        await coordinator.handle(.meetingDetected(makeMeeting()))
+        let recordingState = await coordinator.state
+        guard case .recording(let meetingId) = recordingState else {
+            XCTFail("Expected .recording state")
+            return
+        }
+
+        await coordinator.handle(.recordingFailed(CoordinatorTestError.sample))
+        let errorState = await coordinator.state
+        guard case .error = errorState else {
+            XCTFail("Expected .error state before retry, got \(errorState)")
+            return
+        }
+
+        // Retry -- pipeline processes and calls back via onComplete
+        await coordinator.retryTranscription(meetingId: meetingId)
+
+        // Wait for pipeline callback to transition out of .transcribing
+        let start = Date()
+        var finalState = await coordinator.state
+        while Date().timeIntervalSince(start) < 10.0 {
+            finalState = await coordinator.state
+            if case .transcribing = finalState {
+                try await Task.sleep(for: .milliseconds(100))
+                continue
+            }
+            break
+        }
+
+        // Should NOT be stuck in .transcribing -- callback should have fired
+        if case .transcribing = finalState {
+            XCTFail("Coordinator stuck in .transcribing -- pipeline callback did not fire")
+        }
+        // Accept either .idle (success) or .error (failure) -- both prove the callback works
+    }
+
+    // MARK: - Convenience Methods (Existing)
+
     func testStopRecordingForwardsEvent() async throws {
         let coordinator = makeCoordinator()
         await coordinator.handle(.meetingDetected(makeMeeting()))

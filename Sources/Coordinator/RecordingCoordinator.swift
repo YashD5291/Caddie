@@ -177,7 +177,16 @@ actor RecordingCoordinator {
         logger.info("Recording stopped for meeting \(meetingId), enqueuing transcription")
 
         let db = database
-        await pipeline.enqueue(meetingId: meetingId, database: db)
+        await pipeline.enqueue(meetingId: meetingId, database: db) { [self] meetingId, result in
+            Task {
+                switch result {
+                case .success:
+                    await self.handle(.transcriptionComplete(meetingId: meetingId))
+                case .failure(let error):
+                    await self.handle(.transcriptionFailed(meetingId: meetingId, error))
+                }
+            }
+        }
     }
 
     private func executeRetryTranscription(meetingId: String) async {
@@ -203,7 +212,16 @@ actor RecordingCoordinator {
         }
 
         let db = database
-        await pipeline.enqueue(meetingId: meetingId, database: db)
+        await pipeline.enqueue(meetingId: meetingId, database: db) { [self] meetingId, result in
+            Task {
+                switch result {
+                case .success:
+                    await self.handle(.transcriptionComplete(meetingId: meetingId))
+                case .failure(let error):
+                    await self.handle(.transcriptionFailed(meetingId: meetingId, error))
+                }
+            }
+        }
     }
 
     private func executeNotifyComplete(meetingId: String) async {
