@@ -150,11 +150,11 @@ Plans:
   1. Disconnecting an audio device mid-recording stops the recording gracefully and notifies the user (no crash, no corrupted file)
   2. Stale aggregate device UIDs from previous sessions are cleaned up on app launch
   3. Reconnecting a device after disconnection allows the next meeting to record normally
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 09-01: TBD
-- [ ] 09-02: TBD
+- [ ] 09-01-PLAN.md -- Stale aggregate device cleanup on app launch (REC-06)
+- [ ] 09-02-PLAN.md -- Device disconnection detection with graceful stop through state machine (REC-05)
 
 ## Progress
 
@@ -179,4 +179,4 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 | 6. Error Discipline | 2/2 | Complete | 2026-03-22 |
 | 7. Precondition Guards | 0/TBD | Not started | - |
 | 8. User Feedback | 0/2 | Not started | - |
-| 9. Recording Resilience | 0/TBD | Not started | - |
+| 9. Recording Resilience | 0/2 | Not started | - |
