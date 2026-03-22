@@ -8,10 +8,20 @@ enum AppStatus: String {
     case transcribing
 }
 
+enum PipelineStep: String, Sendable {
+    case idle
+    case mixdown
+    case transcribing
+    case diarizing
+    case compressing
+}
+
 @MainActor
 @Observable
 final class AppState {
     var status: AppStatus = .idle
+    var recordingMode: RecordingMode = .systemAndMic
+    var pipelineStep: PipelineStep = .idle
     var currentMeetingTitle: String?
     var recordingStartTime: Date?
     var transcriptionProgress: Double = 0

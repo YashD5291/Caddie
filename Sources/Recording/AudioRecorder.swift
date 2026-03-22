@@ -2,6 +2,11 @@ import AudioToolbox
 import Foundation
 import os
 
+enum RecordingMode: String, Sendable {
+    case systemAndMic
+    case micOnly
+}
+
 /// Orchestrates SystemAudioCapture + MicrophoneCapture into a stereo WAV file.
 /// Left channel = system audio, Right channel = microphone.
 /// Both channels are 16kHz 16-bit signed integer PCM.
@@ -9,6 +14,8 @@ import os
 /// Audio data flows lock-free from real-time threads:
 ///   render callback -> SPSCRingBuffer.write() (no locks) -> flush timer reads on main thread
 final class AudioRecorder {
+
+    private(set) var recordingMode: RecordingMode = .systemAndMic
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AudioRecorder")
 
@@ -72,7 +79,9 @@ final class AudioRecorder {
                 guard let self else { return }  // Real-time thread -- no logging
                 self.handleSystemAudioBuffer(buffer, count: count)
             }
+            recordingMode = .systemAndMic
         } catch {
+            recordingMode = .micOnly
             logger.error("Failed to start system audio capture: \(error.localizedDescription)")
             logger.warning("Recording will continue with microphone only (system channel will be silence)")
             // Continue without system audio -- microphone-only recording is still useful
@@ -110,6 +119,7 @@ final class AudioRecorder {
 
         systemRingBuffer = nil
         micRingBuffer = nil
+        recordingMode = .systemAndMic
 
         logger.info("AudioRecorder stopped")
     }
