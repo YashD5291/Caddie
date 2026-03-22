@@ -198,11 +198,19 @@ final class TranscriptionPipelineTests: XCTestCase {
         try insertMeeting(meetingId: meetingId)
         try createMinimalWAV(for: meetingId)
 
+        // Clean any pre-existing orphaned mono files from previous test runs
+        let tempDir = FileManager.default.temporaryDirectory
+        let preExisting = (try? FileManager.default.contentsOfDirectory(
+            at: tempDir, includingPropertiesForKeys: nil
+        ))?.filter { $0.lastPathComponent.hasPrefix("caddie_mono_") } ?? []
+        for file in preExisting {
+            try? FileManager.default.removeItem(at: file)
+        }
+
         await pipeline.enqueue(meetingId: meetingId, database: db)
         _ = try await waitForMeetingStatus(meetingId, expected: .done)
 
         // After success, no caddie_mono_* files should remain in temp
-        let tempDir = FileManager.default.temporaryDirectory
         let tempContents = try FileManager.default.contentsOfDirectory(
             at: tempDir, includingPropertiesForKeys: nil
         )
