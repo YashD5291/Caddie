@@ -19,7 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 5: Pipeline Data Integrity** - Eliminate transcript data loss from premature file deletion and failed DB writes
 - [ ] **Phase 6: Error Discipline** - Replace all silent error suppression with logged handling
 - [ ] **Phase 7: Precondition Guards** - Disk space checks and model download timeout
-- [ ] **Phase 8: User Feedback** - Recording status, transcription progress, and notifications in UI
+- [x] **Phase 8: User Feedback** - Recording status, transcription progress, and notifications in UI
 - [ ] **Phase 9: Recording Resilience** - Device disconnection handling and stale resource cleanup
 
 ## Phase Details
@@ -139,8 +139,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 08-01-PLAN.md -- Enrich data model: RecordingMode enum, PipelineStep enum, thread through coordinator to AppState (UX-01, UX-02, UX-04 data layer)
-- [ ] 08-02-PLAN.md -- MenuBarView updates, NotificationManager, wire notifications into coordinator (UX-01, UX-02, UX-03, UX-04 presentation)
+- [x] 08-01-PLAN.md -- Enrich data model: RecordingMode enum, PipelineStep enum, thread through coordinator to AppState (UX-01, UX-02, UX-04 data layer)
+- [x] 08-02-PLAN.md -- MenuBarView updates, NotificationManager, wire notifications into coordinator (UX-01, UX-02, UX-03, UX-04 presentation)
 
 ### Phase 9: Recording Resilience
 **Goal**: Caddie handles device changes and stale resources gracefully instead of crashing or corrupting
@@ -178,5 +178,5 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 | 5. Pipeline Data Integrity | 0/3 | Not started | - |
 | 6. Error Discipline | 2/2 | Complete | 2026-03-22 |
 | 7. Precondition Guards | 0/TBD | Not started | - |
-| 8. User Feedback | 0/2 | Not started | - |
+| 8. User Feedback | 2/2 | Complete | 2026-03-22 |
 | 9. Recording Resilience | 0/2 | Not started | - |
