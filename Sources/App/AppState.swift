@@ -84,7 +84,10 @@ final class AppState {
             // 6. Wire coordinator state changes to observable properties
             await newCoordinator.setOnStateChange { [weak self] newState in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self else {
+                        CaddieLogger.app.warning("AppState deallocated -- state change to \(String(describing: newState)) dropped")
+                        return
+                    }
                     switch newState {
                     case .idle:
                         self.status = .idle

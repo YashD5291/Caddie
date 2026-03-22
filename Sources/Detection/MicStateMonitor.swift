@@ -25,7 +25,11 @@ final class MicStateMonitor: DetectionMonitor {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.handleStateChange()
+            guard let self else {
+                CaddieLogger.detection.warning("MicStateMonitor deallocated -- notification handler orphaned")
+                return
+            }
+            self.handleStateChange()
         }
     }
 

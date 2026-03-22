@@ -57,7 +57,11 @@ final class AudioRecorder {
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now(), repeating: .milliseconds(100))
         timer.setEventHandler { [weak self] in
-            self?.flushRingBuffers()
+            guard let self else {
+                CaddieLogger.recording.warning("AudioRecorder deallocated -- flush timer orphaned")
+                return
+            }
+            self.flushRingBuffers()
         }
         timer.resume()
         flushTimer = timer
@@ -65,7 +69,8 @@ final class AudioRecorder {
         // Start system audio capture
         do {
             try systemCapture.start(processID: processID) { [weak self] (buffer, count) in
-                self?.handleSystemAudioBuffer(buffer, count: count)
+                guard let self else { return }  // Real-time thread -- no logging
+                self.handleSystemAudioBuffer(buffer, count: count)
             }
         } catch {
             logger.error("Failed to start system audio capture: \(error.localizedDescription)")
@@ -75,7 +80,8 @@ final class AudioRecorder {
 
         // Start microphone capture
         try micCapture.start { [weak self] (buffer, count) in
-            self?.handleMicBuffer(buffer, count: count)
+            guard let self else { return }  // Real-time thread -- no logging
+            self.handleMicBuffer(buffer, count: count)
         }
 
         logger.info("AudioRecorder started: \(outputPath.lastPathComponent)")

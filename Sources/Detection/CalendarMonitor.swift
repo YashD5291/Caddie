@@ -29,11 +29,19 @@ final class CalendarMonitor: DetectionMonitor, @unchecked Sendable {
     private func requestAccess() {
         if #available(macOS 14.0, *) {
             eventStore.requestFullAccessToEvents { [weak self] granted, error in
-                self?.handleAccessResult(granted: granted, error: error)
+                guard let self else {
+                    CaddieLogger.detection.warning("CalendarMonitor deallocated -- access callback dropped")
+                    return
+                }
+                self.handleAccessResult(granted: granted, error: error)
             }
         } else {
             eventStore.requestAccess(to: .event) { [weak self] granted, error in
-                self?.handleAccessResult(granted: granted, error: error)
+                guard let self else {
+                    CaddieLogger.detection.warning("CalendarMonitor deallocated -- access callback dropped")
+                    return
+                }
+                self.handleAccessResult(granted: granted, error: error)
             }
         }
     }
@@ -51,14 +59,22 @@ final class CalendarMonitor: DetectionMonitor, @unchecked Sendable {
 
         logger.info("Calendar access granted")
         Task { @MainActor [weak self] in
-            self?.poll()
-            self?.startTimer()
+            guard let self else {
+                CaddieLogger.detection.warning("CalendarMonitor deallocated -- post-access setup dropped")
+                return
+            }
+            self.poll()
+            self.startTimer()
         }
     }
 
     private func startTimer() {
         let t = Timer(timeInterval: 30.0, repeats: true) { [weak self] _ in
-            self?.poll()
+            guard let self else {
+                CaddieLogger.detection.warning("CalendarMonitor deallocated -- poll timer orphaned")
+                return
+            }
+            self.poll()
         }
         t.tolerance = 5.0
         RunLoop.main.add(t, forMode: .common)

@@ -43,10 +43,34 @@ final class MeetingDetector {
     func start() {
         logger.info("Starting meeting detector")
 
-        audioMonitor.onSignal = { [weak self] signal in self?.handleSignal(signal) }
-        micMonitor.onSignal = { [weak self] signal in self?.handleSignal(signal) }
-        windowMonitor.onSignal = { [weak self] signal in self?.handleSignal(signal) }
-        calendarMonitor.onSignal = { [weak self] signal in self?.handleSignal(signal) }
+        audioMonitor.onSignal = { [weak self] signal in
+            guard let self else {
+                CaddieLogger.detection.warning("MeetingDetector deallocated -- audio signal dropped")
+                return
+            }
+            self.handleSignal(signal)
+        }
+        micMonitor.onSignal = { [weak self] signal in
+            guard let self else {
+                CaddieLogger.detection.warning("MeetingDetector deallocated -- mic signal dropped")
+                return
+            }
+            self.handleSignal(signal)
+        }
+        windowMonitor.onSignal = { [weak self] signal in
+            guard let self else {
+                CaddieLogger.detection.warning("MeetingDetector deallocated -- window signal dropped")
+                return
+            }
+            self.handleSignal(signal)
+        }
+        calendarMonitor.onSignal = { [weak self] signal in
+            guard let self else {
+                CaddieLogger.detection.warning("MeetingDetector deallocated -- calendar signal dropped")
+                return
+            }
+            self.handleSignal(signal)
+        }
 
         audioMonitor.start()
         micMonitor.start()
@@ -111,7 +135,11 @@ final class MeetingDetector {
         logger.info("Starting grace period (\(self.graceSeconds)s)")
         graceElapsed = 0
         let t = Timer(timeInterval: 3.0, repeats: true) { [weak self] _ in
-            self?.graceTick()
+            guard let self else {
+                CaddieLogger.detection.warning("MeetingDetector deallocated -- grace timer orphaned")
+                return
+            }
+            self.graceTick()
         }
         t.tolerance = 0.5
         RunLoop.main.add(t, forMode: .common)

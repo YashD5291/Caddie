@@ -15,7 +15,11 @@ final class AudioProcessMonitor: DetectionMonitor {
         logger.info("Starting audio process monitor")
         poll()
         let t = Timer(timeInterval: 3.0, repeats: true) { [weak self] _ in
-            self?.poll()
+            guard let self else {
+                CaddieLogger.detection.warning("AudioProcessMonitor deallocated -- poll timer orphaned")
+                return
+            }
+            self.poll()
         }
         t.tolerance = 1.0
         RunLoop.main.add(t, forMode: .common)
