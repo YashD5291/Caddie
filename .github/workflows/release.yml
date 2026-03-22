@@ -1,0 +1,139 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release DMG
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building Caddie v$VERSION"
+
+      - name: Install tools
+        run: |
+          brew install xcodegen create-dmg
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build Release
+        run: |
+          xcodebuild build \
+            -project Caddie.xcodeproj \
+            -scheme Caddie \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath build \
+            MARKETING_VERSION=${{ steps.version.outputs.version }} \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGN_IDENTITY="-" \
+            | xcbeautify || true
+
+      - name: Run Tests
+        run: |
+          xcodebuild test \
+            -project Caddie.xcodeproj \
+            -scheme Caddie \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            | xcbeautify || true
+
+      - name: Prepare App Bundle
+        id: app
+        run: |
+          APP_PATH="build/Build/Products/Release/Caddie.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Error: Caddie.app not found at $APP_PATH"
+            exit 1
+          fi
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "App bundle size: $(du -sh "$APP_PATH" | cut -f1)"
+
+      - name: Create DMG
+        run: |
+          create-dmg \
+            --volname "Caddie" \
+            --volicon "Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png" \
+            --window-pos 200 120 \
+            --window-size 660 400 \
+            --icon-size 160 \
+            --icon "Caddie.app" 180 170 \
+            --hide-extension "Caddie.app" \
+            --app-drop-link 480 170 \
+            --no-internet-enable \
+            "Caddie-${{ steps.version.outputs.version }}.dmg" \
+            "${{ steps.app.outputs.app_path }}"
+
+      - name: Generate Checksums
+        run: |
+          shasum -a 256 Caddie-${{ steps.version.outputs.version }}.dmg > checksums.txt
+          cat checksums.txt
+
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          # Get commits since last tag
+          PREV_TAG=$(git tag --sort=-version:refname | head -2 | tail -1)
+          if [ -z "$PREV_TAG" ]; then
+            COMMITS=$(git log --oneline --no-merges | head -20)
+          else
+            COMMITS=$(git log --oneline --no-merges "$PREV_TAG"..HEAD | head -30)
+          fi
+
+          cat > release_notes.md << 'HEADER'
+          ## What's New
+
+          HEADER
+
+          echo "$COMMITS" | while read -r line; do
+            echo "- $line" >> release_notes.md
+          done
+
+          cat >> release_notes.md << 'FOOTER'
+
+          ## Installation
+
+          1. Download `Caddie-${{ steps.version.outputs.version }}.dmg`
+          2. Open the DMG and drag Caddie to Applications
+          3. Launch Caddie — it lives in your menu bar
+          4. Grant permissions when prompted (Microphone, Screen Recording, Accessibility, Calendar)
+
+          ## Requirements
+
+          - macOS 14.2 (Sonoma) or later
+          - Apple Silicon recommended (M1+)
+
+          ## Checksums
+
+          ```
+          FOOTER
+
+          cat checksums.txt >> release_notes.md
+          echo '```' >> release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          files: |
+            Caddie-${{ steps.version.outputs.version }}.dmg
+            checksums.txt
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: false
