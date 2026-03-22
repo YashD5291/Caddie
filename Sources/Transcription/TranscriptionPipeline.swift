@@ -1,5 +1,22 @@
 import Foundation
+import GRDB
 import os
+
+// MARK: - PipelineError
+
+enum PipelineError: Error, LocalizedError {
+    case duplicateEnqueue(meetingId: String, status: MeetingStatus)
+    case queueFull(depth: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .duplicateEnqueue(let id, let status):
+            return "Meeting \(id) already has status \(status.rawValue) -- rejecting duplicate enqueue"
+        case .queueFull(let depth):
+            return "Transcription queue full (\(depth) jobs) -- rejecting enqueue"
+        }
+    }
+}
 
 /// Queued actor that processes transcription jobs one at a time.
 /// Pipeline: Mono Mixdown -> ASR -> Diarize -> Merge -> Write DB -> Compress -> Done -> Delete WAV
@@ -13,12 +30,16 @@ actor TranscriptionPipeline {
     private var queue: [(meetingId: String, database: AppDatabase?, onComplete: (@Sendable (String, Result<Void, Error>) -> Void)?)] = []
     private var isProcessing = false
 
+    // DATA-08: Bounded queue depth
+    private static let maxQueueDepth = 50
+
     init(asr: any ASREngineProtocol, diarization: any DiarizationEngineProtocol) {
         self.asrEngine = asr
         self.diarizationEngine = diarization
     }
 
     /// Enqueues a meeting for transcription processing.
+    /// Rejects duplicates (.transcribing/.done) and overflows (>= 50 pending).
     /// - Parameters:
     ///   - meetingId: The meeting identifier.
     ///   - database: Optional database for status updates.
@@ -27,7 +48,33 @@ actor TranscriptionPipeline {
         meetingId: String,
         database: AppDatabase? = nil,
         onComplete: (@Sendable (String, Result<Void, Error>) -> Void)? = nil
-    ) {
+    ) async {
+        // DATA-08: Bounded queue
+        guard queue.count < Self.maxQueueDepth else {
+            logger.warning("Queue full (\(self.queue.count) jobs), rejecting \(meetingId)")
+            onComplete?(meetingId, .failure(PipelineError.queueFull(depth: queue.count)))
+            return
+        }
+
+        // DATA-07: Duplicate rejection -- skip if DB not provided (legacy/test compat)
+        if let db = database {
+            let currentStatus: MeetingStatus?
+            do {
+                currentStatus = try await db.dbWriter.read { dbConn in
+                    try Meeting.filter(Column("meeting_id") == meetingId)
+                        .fetchOne(dbConn)?.status
+                }
+            } catch {
+                logger.warning("Failed to check duplicate status for \(meetingId): \(error.localizedDescription)")
+                currentStatus = nil
+            }
+            if let status = currentStatus, status == .transcribing || status == .done {
+                logger.warning("Meeting \(meetingId) already \(status.rawValue), rejecting duplicate")
+                onComplete?(meetingId, .failure(PipelineError.duplicateEnqueue(meetingId: meetingId, status: status)))
+                return
+            }
+        }
+
         queue.append((meetingId, database, onComplete))
         logger.info("Enqueued meeting \(meetingId) for transcription (queue depth: \(self.queue.count))")
 
