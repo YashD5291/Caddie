@@ -54,6 +54,7 @@ final class AppState {
             database = try AppDatabase()
             try AudioFileManager.ensureDirectoryExists()
             AudioFileManager.cleanupOrphanedTempFiles() // DATA-05
+            SystemAudioCapture.cleanupStaleAggregateDevices() // REC-06
 
             // 1. Download models (FluidAudio handles caching -- instant if already downloaded)
             await modelManager.downloadModelsIfNeeded()
@@ -104,6 +105,8 @@ final class AppState {
                         self.status = .idle
                         self.currentMeetingTitle = nil
                         self.recordingStartTime = nil
+                        self.recordingMode = .systemAndMic
+                        self.pipelineStep = .idle
                     case .recording:
                         self.status = .recording
                         self.recordingStartTime = Date()
@@ -112,6 +115,22 @@ final class AppState {
                     case .error:
                         self.status = .idle
                     }
+                }
+            }
+
+            // Wire recording mode changes to observable property
+            await newCoordinator.setOnRecordingModeChange { [weak self] mode in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.recordingMode = mode
+                }
+            }
+
+            // Wire pipeline step changes to observable property
+            await newCoordinator.setOnPipelineStepChange { [weak self] step in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.pipelineStep = step
                 }
             }
 

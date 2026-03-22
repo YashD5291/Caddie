@@ -20,6 +20,8 @@ actor RecordingCoordinator {
     // MARK: - Callbacks
 
     private var onStateChange: (@Sendable (RecordingState) -> Void)?
+    private var onRecordingModeChange: (@Sendable (RecordingMode) -> Void)?
+    private var onPipelineStepChange: (@Sendable (PipelineStep) -> Void)?
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "RecordingCoordinator")
 
@@ -44,6 +46,14 @@ actor RecordingCoordinator {
         self.onStateChange = callback
     }
 
+    func setOnRecordingModeChange(_ callback: (@Sendable (RecordingMode) -> Void)?) {
+        self.onRecordingModeChange = callback
+    }
+
+    func setOnPipelineStepChange(_ callback: (@Sendable (PipelineStep) -> Void)?) {
+        self.onPipelineStepChange = callback
+    }
+
     /// Process a recording event through the state machine.
     /// Synchronously transitions state, then executes any resulting side effect.
     func handle(_ event: RecordingEvent) async {
@@ -63,7 +73,13 @@ actor RecordingCoordinator {
 
     /// Wire up the meeting detector callbacks and start detection.
     /// Call this AFTER the pipeline is fully initialized.
-    func start() {
+    func start() async {
+        // Forward pipeline step changes to AppState via callback
+        nonisolated(unsafe) let stepCallback = onPipelineStepChange
+        await pipeline.setOnStepChange { _, step in
+            stepCallback?(step)
+        }
+
         nonisolated(unsafe) let coordinator = self
         detector.onMeetingStarted = { meeting in
             Task { await coordinator.handle(.meetingDetected(meeting)) }
@@ -176,6 +192,11 @@ actor RecordingCoordinator {
         let wavPath = AudioFileManager.wavPath(for: meetingId)
         do {
             try recorder.start(outputPath: wavPath, processID: meeting.processId)
+            let mode = recorder.recordingMode
+            onRecordingModeChange?(mode)
+            if mode == .micOnly {
+                logger.warning("Recording in mic-only mode -- system audio capture failed")
+            }
             logger.info("Recording started for meeting \(meetingId)")
         } catch {
             logger.error("Failed to start recording: \(error.localizedDescription)")

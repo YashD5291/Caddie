@@ -36,6 +36,12 @@ actor TranscriptionPipeline {
     /// Each enqueue() chains a new Task that awaits the previous one before draining.
     private var processingTask: Task<Void, Never>?
 
+    private var onStepChange: (@Sendable (String, PipelineStep) -> Void)?
+
+    func setOnStepChange(_ callback: (@Sendable (String, PipelineStep) -> Void)?) {
+        self.onStepChange = callback
+    }
+
     // DATA-08: Bounded queue depth
     private static let maxQueueDepth = 50
 
@@ -126,16 +132,19 @@ actor TranscriptionPipeline {
             let wavURL = AudioFileManager.wavPath(for: meetingId)
 
             // Step 1: Create mono mixdown
+            onStepChange?(meetingId, .mixdown)
             logger.info("[\(meetingId)] Creating mono mixdown...")
             let monoURL = try AudioFileManager.createMonoMixdown(stereoURL: wavURL)
             logger.info("[\(meetingId)] Mono mixdown created")
 
             // Step 2: ASR
+            onStepChange?(meetingId, .transcribing)
             logger.info("[\(meetingId)] Running ASR...")
             let (asrSegments, language, duration) = try await asrEngine.transcribe(audioURL: monoURL)
             logger.info("[\(meetingId)] ASR complete: \(asrSegments.count) segments, language=\(language)")
 
             // Step 3: Diarization
+            onStepChange?(meetingId, .diarizing)
             logger.info("[\(meetingId)] Running diarization...")
             let speakerSegments = try await diarizationEngine.diarize(audioURL: monoURL)
             logger.info("[\(meetingId)] Diarization complete: \(speakerSegments.count) speaker segments")
@@ -182,6 +191,7 @@ actor TranscriptionPipeline {
             }
 
             // Step 6: Compress WAV to ALAC
+            onStepChange?(meetingId, .compressing)
             logger.info("[\(meetingId)] Compressing to ALAC...")
             let alacURL = AudioFileManager.alacPath(for: meetingId)
             try AudioFileManager.compressToALAC(wavURL: wavURL, outputURL: alacURL)
@@ -200,6 +210,7 @@ actor TranscriptionPipeline {
 
             logger.info("[\(meetingId)] Pipeline complete in \(String(format: "%.1f", processingTime))s")
 
+            onStepChange?(meetingId, .idle)
             onComplete?(meetingId, .success(()))
 
         } catch {
@@ -220,6 +231,7 @@ actor TranscriptionPipeline {
                 }
             }
 
+            onStepChange?(meetingId, .idle)
             onComplete?(meetingId, .failure(error))
         }
     }
