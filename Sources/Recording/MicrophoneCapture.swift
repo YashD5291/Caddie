@@ -68,7 +68,8 @@ final class MicrophoneCapture {
         let bufferSize: AVAudioFrameCount = 4096
         inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) {
             [weak self] (buffer, _) in
-            self?.processInputBuffer(buffer, ratio: ratio)
+            guard let self else { return } // Real-time thread -- no logging
+            self.processInputBuffer(buffer, ratio: ratio)
         }
 
         try engine.start()
