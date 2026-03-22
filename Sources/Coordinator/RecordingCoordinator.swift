@@ -164,8 +164,11 @@ actor RecordingCoordinator {
             }
             logger.info("Created meeting record: \(meetingId)")
         } catch {
+            // DATA-01: DB insert failure aborts recording.
+            // Error is logged and state transitions to .error -> user sees idle status.
+            // Note: Since the meeting record doesn't exist in DB, executeNotifyError's
+            // UPDATE will affect 0 rows. This is safe. User notification via Phase 8 (UX-03).
             logger.error("Failed to insert meeting record: \(error.localizedDescription)")
-            // Transition to error state since we can't proceed without a DB record
             await handle(.recordingFailed(error))
             return
         }
@@ -266,6 +269,9 @@ actor RecordingCoordinator {
         }
     }
 
+    // Note: If called for a meeting that was never inserted (e.g., DATA-01 DB insert
+    // failure), the UPDATE will affect 0 rows. This is safe -- the error is still
+    // logged and the state machine transitions correctly to .error -> .idle.
     private func executeNotifyError(meetingId: String, error: Error) async {
         do {
             try await database.dbWriter.write { dbConn in
