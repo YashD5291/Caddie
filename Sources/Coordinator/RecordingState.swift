@@ -33,6 +33,7 @@ enum RecordingEvent: Sendable {
     case transcriptionComplete(meetingId: String)
     case transcriptionFailed(meetingId: String, Error)
     case retryRequested(meetingId: String)
+    case deviceDisconnected
     case reset
 }
 
@@ -83,6 +84,12 @@ extension RecordingState {
             )
 
         case (.recording(let meetingId), .meetingEnded):
+            return (
+                .transcribing(meetingId: meetingId),
+                .stopAndTranscribe(meetingId: meetingId)
+            )
+
+        case (.recording(let meetingId), .deviceDisconnected):
             return (
                 .transcribing(meetingId: meetingId),
                 .stopAndTranscribe(meetingId: meetingId)

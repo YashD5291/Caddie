@@ -239,6 +239,50 @@ final class RecordingStateTests: XCTestCase {
         XCTAssertNil(result)
     }
 
+    // MARK: - Device Disconnected Transitions
+
+    func testRecordingDeviceDisconnectedTransitionsToTranscribing() {
+        let result = RecordingState.reduce(
+            state: .recording(meetingId: "abc123"),
+            event: .deviceDisconnected
+        )
+
+        XCTAssertNotNil(result)
+        let (newState, sideEffect) = result!
+        guard case .transcribing(let meetingId) = newState else {
+            XCTFail("Expected .transcribing state, got \(newState)")
+            return
+        }
+        XCTAssertEqual(meetingId, "abc123")
+
+        guard case .stopAndTranscribe(let effectId) = sideEffect else {
+            XCTFail("Expected .stopAndTranscribe side effect")
+            return
+        }
+        XCTAssertEqual(effectId, "abc123")
+    }
+
+    func testIdleDeviceDisconnectedIsInvalid() {
+        let result = RecordingState.reduce(state: .idle, event: .deviceDisconnected)
+        XCTAssertNil(result)
+    }
+
+    func testTranscribingDeviceDisconnectedIsInvalid() {
+        let result = RecordingState.reduce(
+            state: .transcribing(meetingId: "abc123"),
+            event: .deviceDisconnected
+        )
+        XCTAssertNil(result)
+    }
+
+    func testErrorDeviceDisconnectedIsInvalid() {
+        let result = RecordingState.reduce(
+            state: .error(meetingId: "abc123", TestError.sample),
+            event: .deviceDisconnected
+        )
+        XCTAssertNil(result)
+    }
+
     // MARK: - Equatable
 
     func testIdleEquality() {
