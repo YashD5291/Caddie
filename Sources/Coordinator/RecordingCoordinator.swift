@@ -215,6 +215,8 @@ actor RecordingCoordinator {
         }
     }
 
+    // DATA-06: Retry uses coordinator's non-optional database (always fresh per Phase 4).
+    // No stale DB risk -- database is a required init parameter, not optional.
     private func executeRetryTranscription(meetingId: String) async {
         let wavURL = AudioFileManager.wavPath(for: meetingId)
         guard FileManager.default.fileExists(atPath: wavURL.path) else {

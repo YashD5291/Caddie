@@ -62,7 +62,15 @@ actor TranscriptionPipeline {
             return
         }
 
-        // DATA-07: Duplicate rejection -- skip if DB not provided (legacy/test compat)
+        // DATA-07: Duplicate rejection
+        // Check 1: Reject if meetingId is already in the pending queue
+        if queue.contains(where: { $0.meetingId == meetingId }) {
+            logger.warning("Meeting \(meetingId) already in queue, rejecting duplicate")
+            onComplete?(meetingId, .failure(PipelineError.duplicateEnqueue(meetingId: meetingId, status: .transcribing)))
+            return
+        }
+
+        // Check 2: Reject .done meetings via DB (already fully processed)
         if let db = database {
             let currentStatus: MeetingStatus?
             do {
@@ -71,10 +79,10 @@ actor TranscriptionPipeline {
                         .fetchOne(dbConn)?.status
                 }
             } catch {
-                logger.warning("Failed to check duplicate status for \(meetingId): \(error.localizedDescription)")
+                logger.warning("Failed to check status for \(meetingId): \(error.localizedDescription)")
                 currentStatus = nil
             }
-            if let status = currentStatus, status == .transcribing || status == .done {
+            if let status = currentStatus, status == .done {
                 logger.warning("Meeting \(meetingId) already \(status.rawValue), rejecting duplicate")
                 onComplete?(meetingId, .failure(PipelineError.duplicateEnqueue(meetingId: meetingId, status: status)))
                 return

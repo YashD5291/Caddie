@@ -310,14 +310,30 @@ final class TranscriptionPipelineTests: XCTestCase {
 
     // MARK: - Entry Guards (DATA-07, DATA-08)
 
-    func testRejectsDuplicateEnqueueForTranscribingMeeting() async throws {
-        let meetingId = "dup-transcribing-\(UUID().uuidString.prefix(8))"
-        try insertMeeting(meetingId: meetingId, status: .transcribing)
+    func testRejectsDuplicateEnqueueForAlreadyQueuedMeeting() async throws {
+        // Use a slow mock so the first job stays in queue
+        let slowASR = MockASREngine()
+        slowASR.delay = 60.0
+        let slowPipeline = TranscriptionPipeline(asr: slowASR, diarization: mockDiarization)
 
+        let meetingId = "dup-queued-\(UUID().uuidString.prefix(8))"
+        try insertMeeting(meetingId: meetingId)
+        try createMinimalWAV(for: meetingId)
+
+        // First enqueue (will start processing with slow ASR)
+        await slowPipeline.enqueue(meetingId: meetingId, database: db)
+
+        // Enqueue a second job to fill the queue with something
+        let meetingId2 = "dup-queued2-\(UUID().uuidString.prefix(8))"
+        try insertMeeting(meetingId: meetingId2)
+        try createMinimalWAV(for: meetingId2)
+        await slowPipeline.enqueue(meetingId: meetingId2, database: db)
+
+        // Try to enqueue meetingId2 again -- should be rejected (already in queue)
         let expectation = XCTestExpectation(description: "onComplete called with failure")
         let resultBox = CallbackResultBox()
 
-        await pipeline.enqueue(meetingId: meetingId, database: db) { cbMeetingId, result in
+        await slowPipeline.enqueue(meetingId: meetingId2, database: db) { cbMeetingId, result in
             resultBox.meetingId = cbMeetingId
             resultBox.result = result
             expectation.fulfill()
@@ -326,7 +342,7 @@ final class TranscriptionPipelineTests: XCTestCase {
         await fulfillment(of: [expectation], timeout: 5.0)
 
         guard case .failure(let error) = resultBox.result else {
-            XCTFail("Expected .failure for duplicate enqueue of .transcribing meeting")
+            XCTFail("Expected .failure for duplicate enqueue of already-queued meeting")
             return
         }
         XCTAssertTrue(error is PipelineError, "Error should be PipelineError.duplicateEnqueue")

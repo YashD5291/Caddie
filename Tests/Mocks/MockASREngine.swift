@@ -8,12 +8,16 @@ final class MockASREngine: ASREngineProtocol, @unchecked Sendable {
         duration: 5.0
     )
     var stubbedError: Error?
+    var delay: TimeInterval = 0
     private(set) var transcribeCallCount = 0
     private(set) var lastAudioURL: URL?
 
     func transcribe(audioURL: URL) async throws -> (segments: [ASRSegment], language: String, duration: Double) {
         transcribeCallCount += 1
         lastAudioURL = audioURL
+        if delay > 0 {
+            try await Task.sleep(for: .seconds(delay))
+        }
         if let error = stubbedError { throw error }
         return stubbedResult
     }
