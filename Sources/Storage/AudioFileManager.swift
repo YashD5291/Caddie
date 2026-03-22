@@ -273,6 +273,33 @@ enum AudioFileManager {
         }
     }
 
+    /// Removes orphaned caddie_mono_* temp files from previous sessions.
+    /// Called on app startup to reclaim disk space from crashed transcriptions.
+    static func cleanupOrphanedTempFiles() {
+        let tempDir = FileManager.default.temporaryDirectory
+        let fm = FileManager.default
+        let contents: [URL]
+        do {
+            contents = try fm.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
+        } catch {
+            logger.warning("Failed to enumerate temp directory: \(error.localizedDescription)")
+            return
+        }
+
+        let orphans = contents.filter { $0.lastPathComponent.hasPrefix("caddie_mono_") }
+        for orphan in orphans {
+            do {
+                try fm.removeItem(at: orphan)
+            } catch {
+                logger.warning("Failed to remove orphaned temp file \(orphan.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+
+        if !orphans.isEmpty {
+            logger.info("Cleaned up \(orphans.count) orphaned temp file(s)")
+        }
+    }
+
     // MARK: - Errors
 
     enum AudioError: Error {

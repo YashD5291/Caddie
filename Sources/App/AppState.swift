@@ -43,6 +43,7 @@ final class AppState {
         do {
             database = try AppDatabase()
             try AudioFileManager.ensureDirectoryExists()
+            AudioFileManager.cleanupOrphanedTempFiles() // DATA-05
 
             // 1. Download models (FluidAudio handles caching -- instant if already downloaded)
             await modelManager.downloadModelsIfNeeded()

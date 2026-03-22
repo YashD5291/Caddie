@@ -418,6 +418,43 @@ final class TranscriptionPipelineTests: XCTestCase {
         XCTAssertTrue(error is PipelineError, "Error should be PipelineError.queueFull")
     }
 
+    // MARK: - Orphaned Temp Cleanup (DATA-05)
+
+    func testCleanupOrphanedTempFilesRemovesCaddieMonoFiles() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+        let orphan1 = tempDir.appendingPathComponent("caddie_mono_test1.wav")
+        let orphan2 = tempDir.appendingPathComponent("caddie_mono_test2.wav")
+        try Data("test".utf8).write(to: orphan1)
+        try Data("test".utf8).write(to: orphan2)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: orphan1.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: orphan2.path))
+
+        AudioFileManager.cleanupOrphanedTempFiles()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphan1.path),
+                       "caddie_mono_ files should be removed")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphan2.path),
+                       "caddie_mono_ files should be removed")
+    }
+
+    func testCleanupOrphanedTempFilesPreservesNonCaddieFiles() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+        let otherFile = tempDir.appendingPathComponent("other_temp_\(UUID().uuidString.prefix(8)).txt")
+        try Data("keep me".utf8).write(to: otherFile)
+
+        AudioFileManager.cleanupOrphanedTempFiles()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: otherFile.path),
+                      "Non-caddie temp files should be preserved")
+        try? FileManager.default.removeItem(at: otherFile)
+    }
+
+    func testCleanupOrphanedTempFilesHandlesEmptyTempDir() {
+        // Just verify it doesn't throw/crash when no orphans exist
+        AudioFileManager.cleanupOrphanedTempFiles()
+    }
+
     // MARK: - Reentrancy Safety (ERR-04)
 
     func testConcurrentEnqueueProcessesSequentially() async throws {
