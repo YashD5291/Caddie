@@ -180,3 +180,13 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 | 7. Precondition Guards | 0/TBD | Not started | - |
 | 8. User Feedback | 2/2 | Complete | 2026-03-22 |
 | 9. Recording Resilience | 2/2 | Complete | 2026-03-22 |
+
+### Phase 10: Bundle ML models in app instead of runtime download
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 9
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 10 to break down)
