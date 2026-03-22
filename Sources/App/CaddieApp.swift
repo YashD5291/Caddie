@@ -15,8 +15,13 @@ struct CaddieApp: App {
                 Image(systemName: "mic.badge.plus")
                     .symbolRenderingMode(.monochrome)
             case .recording:
-                Image(systemName: "record.circle.fill")
-                    .symbolRenderingMode(.monochrome)
+                if appState.recordingMode == .micOnly {
+                    Image(systemName: "mic.fill")
+                        .symbolRenderingMode(.monochrome)
+                } else {
+                    Image(systemName: "record.circle.fill")
+                        .symbolRenderingMode(.monochrome)
+                }
             case .transcribing:
                 Image(systemName: "waveform")
                     .symbolRenderingMode(.monochrome)
@@ -42,6 +47,7 @@ struct CaddieApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
     func applicationDidFinishLaunching(_ notification: Notification) {
         CaddieLogger.app.info("Caddie launched")
+        NotificationManager.requestAuthorization()
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(windowDidBecomeKey(_:)),

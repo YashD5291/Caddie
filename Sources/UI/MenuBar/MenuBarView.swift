@@ -31,6 +31,11 @@ struct MenuBarView: View {
 
         case .recording:
             Text("\u{1F534} \(appState.currentMeetingTitle ?? "Recording...")")
+            if appState.recordingMode == .micOnly {
+                Text("\u{26A0}\u{FE0F} Microphone Only")
+            } else {
+                Text("System Audio + Mic")
+            }
             Text("Recording \u{00B7} \(Formatters.duration(seconds: Int(appState.recordingDuration)))")
             Button {
                 confirmStopRecording()
@@ -39,7 +44,9 @@ struct MenuBarView: View {
             }
 
         case .transcribing:
-            Text("Transcribing...")
+            Text("Processing...")
+            Text(pipelineStepLabel(appState.pipelineStep))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -108,6 +115,16 @@ struct MenuBarView: View {
         } catch {
             menuBarLogger.warning("Failed to fetch recent meetings: \(error.localizedDescription)")
             return []
+        }
+    }
+
+    private func pipelineStepLabel(_ step: PipelineStep) -> String {
+        switch step {
+        case .idle: return "Queued"
+        case .mixdown: return "Mixing down audio..."
+        case .transcribing: return "Transcribing speech..."
+        case .diarizing: return "Identifying speakers..."
+        case .compressing: return "Compressing audio..."
         }
     }
 
