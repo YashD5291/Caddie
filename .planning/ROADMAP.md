@@ -111,8 +111,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 06-01-PLAN.md -- Replace all try? with do-catch logging and all force unwraps with guard-let (ERR-01, ERR-02)
-- [ ] 06-02-PLAN.md -- Guard-let-self in all weak self closures and actor reentrancy fix in TranscriptionPipeline (ERR-03, ERR-04)
+- [x] 06-01-PLAN.md -- Replace all try? with do-catch logging and all force unwraps with guard-let (ERR-01, ERR-02)
+- [x] 06-02-PLAN.md -- Guard-let-self in all weak self closures and actor reentrancy fix in TranscriptionPipeline (ERR-03, ERR-04)
 
 ### Phase 7: Precondition Guards
 **Goal**: Recording and onboarding fail fast with clear user feedback instead of failing mid-operation
@@ -176,7 +176,7 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 | 3. Audio Thread Safety | 2/2 | Complete | 2026-03-22 |
 | 4. Recording Coordinator | 3/3 | Complete | 2026-03-22 |
 | 5. Pipeline Data Integrity | 0/3 | Not started | - |
-| 6. Error Discipline | 0/2 | Not started | - |
+| 6. Error Discipline | 2/2 | Complete | 2026-03-22 |
 | 7. Precondition Guards | 0/TBD | Not started | - |
 | 8. User Feedback | 0/TBD | Not started | - |
 | 9. Recording Resilience | 0/TBD | Not started | - |

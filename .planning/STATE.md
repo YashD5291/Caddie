@@ -9,7 +9,7 @@ progress:
   total_phases: 9
   completed_phases: 7
   total_plans: 15
-  completed_plans: 10
+  completed_plans: 12
 ---
 
 # Project State
@@ -56,6 +56,8 @@ Plan: Not started
 | Phase 04 P01 | 9min | 1 tasks | 3 files |
 | Phase 04 P02 | 23min | 2 tasks | 4 files |
 | Phase 04 P03 | 22min | 2 tasks | 4 files |
+| Phase 06 P01 | 12min | 2 tasks | 10 files |
+| Phase 06 P02 | 10min | 2 tasks | 9 files |
 | Phase 07 P01 | 21min | 2 tasks | 4 files |
 
 ## Accumulated Context
@@ -86,6 +88,11 @@ Recent decisions affecting current work:
 - [Phase 07]: withThrowingTaskGroup race pattern for async timeout -- cancels loser automatically
 - [Phase 07]: Disk check before DB insert in executeStartRecording -- fail fast before side effects
 - [Phase 07]: withTimeout internal access for testability without mocking FluidAudio downloads
+- [Phase 06]: File-level private loggers for SwiftUI view files (structs recreated on render)
+- [Phase 06]: print() fallback in CaddieLogger.showLogs to avoid circular logger dependency
+- [Phase 06]: fatalError with descriptive message for AudioFileManager.audioDirectory (guaranteed by macOS)
+- [Phase 06]: Task-chaining via processingTask replaces isProcessing flag for reentrancy safety
+- [Phase 06]: Real-time audio callbacks guard without logging (priority inversion risk)
 
 ### Pending Todos
 
@@ -98,6 +105,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T00:11:59Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-03-22T00:12:00Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
