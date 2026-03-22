@@ -62,6 +62,11 @@ jobs:
             echo "Error: Caddie.app not found at $APP_PATH"
             exit 1
           fi
+
+          # Deep ad-hoc sign (ensures all embedded frameworks are signed)
+          codesign --force --deep --sign - "$APP_PATH"
+          codesign -v "$APP_PATH"
+
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "App bundle size: $(du -sh "$APP_PATH" | cut -f1)"
 
