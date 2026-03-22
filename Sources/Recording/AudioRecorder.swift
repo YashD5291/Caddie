@@ -15,6 +15,9 @@ enum RecordingMode: String, Sendable {
 ///   render callback -> SPSCRingBuffer.write() (no locks) -> flush timer reads on main thread
 final class AudioRecorder {
 
+    /// Called when the system audio device disconnects mid-recording.
+    var onDeviceDisconnected: (@Sendable () -> Void)?
+
     private(set) var recordingMode: RecordingMode = .systemAndMic
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AudioRecorder")
@@ -80,6 +83,14 @@ final class AudioRecorder {
                 self.handleSystemAudioBuffer(buffer, count: count)
             }
             recordingMode = .systemAndMic
+            systemCapture.onDisconnect = { [weak self] in
+                CaddieLogger.recording.error("System audio device disconnected mid-recording")
+                // Capture callback before dispatching to avoid sending self across isolation
+                let callback = self?.onDeviceDisconnected
+                DispatchQueue.main.async {
+                    callback?()
+                }
+            }
         } catch {
             recordingMode = .micOnly
             logger.error("Failed to start system audio capture: \(error.localizedDescription)")
@@ -101,6 +112,7 @@ final class AudioRecorder {
         guard isRecording else { return }
         isRecording = false
 
+        systemCapture.onDisconnect = nil  // Prevent disconnect callback during intentional stop
         systemCapture.stop()
         micCapture.stop()
 

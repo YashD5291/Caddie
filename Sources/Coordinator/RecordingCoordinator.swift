@@ -193,6 +193,9 @@ actor RecordingCoordinator {
         let wavPath = AudioFileManager.wavPath(for: meetingId)
         do {
             try recorder.start(outputPath: wavPath, processID: meeting.processId)
+            recorder.onDeviceDisconnected = { [self] in
+                Task { await self.handle(.deviceDisconnected) }
+            }
             let mode = recorder.recordingMode
             onRecordingModeChange?(mode)
             NotificationManager.recordingStarted(title: meeting.title, mode: mode)
@@ -208,6 +211,7 @@ actor RecordingCoordinator {
     }
 
     private func executeStopAndTranscribe(meetingId: String) async {
+        recorder.onDeviceDisconnected = nil  // Clear before stop to avoid re-entrant disconnect
         recorder.stop()
 
         let endTime = ISO8601DateFormatter().string(from: Date())

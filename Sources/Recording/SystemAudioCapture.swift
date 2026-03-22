@@ -29,6 +29,9 @@ final class SystemAudioCapture {
         var onBuffer: BufferCallback?
     }
 
+    /// Called when the aggregate device dies (e.g., hardware disconnected mid-recording).
+    var onDisconnect: (() -> Void)?
+
     private var audioUnit: AudioComponentInstance?
     private var onBuffer: BufferCallback?
     private var renderContext: RenderContext?
@@ -124,6 +127,8 @@ final class SystemAudioCapture {
     func stop() {
         guard isRunning else { return }
         isRunning = false
+
+        removeDeviceAliveListener()
 
         if let unit = audioUnit {
             AudioOutputUnitStop(unit)
@@ -259,6 +264,44 @@ final class SystemAudioCapture {
         }
         aggregateDeviceID = aggregateID
         logger.debug("Created aggregate device with ID \(aggregateID)")
+        registerDeviceAliveListener()
+    }
+
+    // MARK: - Device Alive Listener
+
+    private func registerDeviceAliveListener() {
+        guard aggregateDeviceID != kAudioObjectUnknown else { return }
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let status = AudioObjectAddPropertyListener(
+            aggregateDeviceID,
+            &address,
+            deviceAliveListener,
+            Unmanaged.passUnretained(self).toOpaque()
+        )
+        if status != noErr {
+            logger.warning("Failed to register device alive listener: OSStatus \(status)")
+        }
+    }
+
+    private func removeDeviceAliveListener() {
+        guard aggregateDeviceID != kAudioObjectUnknown else { return }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListener(
+            aggregateDeviceID,
+            &address,
+            deviceAliveListener,
+            Unmanaged.passUnretained(self).toOpaque()
+        )
     }
 
     // MARK: - AudioUnit Setup
@@ -397,6 +440,8 @@ final class SystemAudioCapture {
     // MARK: - Cleanup
 
     private func cleanup() {
+        removeDeviceAliveListener()
+
         if let unit = audioUnit {
             AudioUnitUninitialize(unit)
             AudioComponentInstanceDispose(unit)
@@ -464,6 +509,37 @@ final class SystemAudioCapture {
             }
         }
     }
+}
+
+// MARK: - Device Alive Listener (free function)
+
+/// Called by CoreAudio when the aggregate device's alive status changes.
+/// Uses Unmanaged.passUnretained(self) -- safe because removeDeviceAliveListener()
+/// is called synchronously in stop()/cleanup() before self can deallocate.
+private func deviceAliveListener(
+    objectID: AudioObjectID,
+    numberAddresses: UInt32,
+    addresses: UnsafePointer<AudioObjectPropertyAddress>,
+    clientData: UnsafeMutableRawPointer?
+) -> OSStatus {
+    guard let clientData else { return noErr }
+    let capture = Unmanaged<SystemAudioCapture>.fromOpaque(clientData).takeUnretainedValue()
+
+    var isAlive: UInt32 = 1
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyDeviceIsAlive,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, &isAlive)
+
+    if isAlive == 0 {
+        systemAudioCaptureLogger.error("Aggregate device \(objectID) is no longer alive")
+        capture.onDisconnect?()
+    }
+
+    return noErr
 }
 
 // MARK: - Render Callback (free function)
