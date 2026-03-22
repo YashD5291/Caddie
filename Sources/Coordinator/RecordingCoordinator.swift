@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import os
 
 /// Actor-based coordinator that owns the recording lifecycle.
@@ -194,7 +195,9 @@ actor RecordingCoordinator {
             try recorder.start(outputPath: wavPath, processID: meeting.processId)
             let mode = recorder.recordingMode
             onRecordingModeChange?(mode)
+            NotificationManager.recordingStarted(title: meeting.title, mode: mode)
             if mode == .micOnly {
+                NotificationManager.systemAudioFallback()
                 logger.warning("Recording in mic-only mode -- system audio capture failed")
             }
             logger.info("Recording started for meeting \(meetingId)")
@@ -288,6 +291,9 @@ actor RecordingCoordinator {
         } catch {
             logger.error("Failed to update meeting status to done: \(error.localizedDescription)")
         }
+
+        let title = await fetchMeetingTitle(meetingId: meetingId)
+        NotificationManager.transcriptionComplete(title: title)
     }
 
     // Note: If called for a meeting that was never inserted (e.g., DATA-01 DB insert
@@ -303,6 +309,21 @@ actor RecordingCoordinator {
             }
         } catch {
             logger.error("Failed to update meeting error status: \(error.localizedDescription)")
+        }
+
+        let title = await fetchMeetingTitle(meetingId: meetingId)
+        NotificationManager.transcriptionError(title: title, error: error.localizedDescription)
+    }
+
+    private func fetchMeetingTitle(meetingId: String) async -> String {
+        do {
+            return try await database.dbWriter.read { dbConn in
+                try Meeting.filter(Column("meeting_id") == meetingId)
+                    .fetchOne(dbConn)?.title ?? "Meeting"
+            }
+        } catch {
+            logger.warning("Failed to fetch title for notification: \(error.localizedDescription)")
+            return "Meeting"
         }
     }
 }
