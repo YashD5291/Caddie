@@ -12,6 +12,8 @@ import os
 /// 3. Build an aggregate device that includes the tap
 /// 4. Set up a HAL Output AudioUnit to pull audio from the aggregate device
 /// 5. Render callback delivers 16kHz mono Int16 samples via BufferCallback
+private let systemAudioCaptureLogger = Logger(subsystem: "com.caddie.app", category: "SystemAudioCapture")
+
 final class SystemAudioCapture {
 
     typealias BufferCallback = (UnsafeBufferPointer<Int16>, Int) -> Void
@@ -40,6 +42,57 @@ final class SystemAudioCapture {
 
     deinit {
         stop()
+    }
+
+    // MARK: - Stale Device Cleanup
+
+    /// Destroy any aggregate devices left behind by previous Caddie sessions.
+    /// Best-effort: logs errors but never throws. Safe to call at app launch.
+    static func cleanupStaleAggregateDevices() {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize
+        )
+        guard status == noErr, dataSize > 0 else { return }
+
+        let deviceCount = Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        var deviceIDs = [AudioDeviceID](repeating: 0, count: deviceCount)
+        status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize, &deviceIDs
+        )
+        guard status == noErr else { return }
+
+        var removedCount = 0
+        for deviceID in deviceIDs {
+            var uidAddress = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceUID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var uid: CFString = "" as CFString
+            var uidSize = UInt32(MemoryLayout<CFString>.size)
+            let uidStatus = AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, &uid)
+            guard uidStatus == noErr else { continue }
+
+            let uidString = uid as String
+            if uidString.hasPrefix("com.caddie.systemTap.") {
+                let destroyStatus = AudioHardwareDestroyAggregateDevice(deviceID)
+                if destroyStatus == noErr {
+                    removedCount += 1
+                } else {
+                    systemAudioCaptureLogger.warning("Failed to destroy stale aggregate device \(uidString): OSStatus \(destroyStatus)")
+                }
+            }
+        }
+
+        if removedCount > 0 {
+            systemAudioCaptureLogger.info("Cleaned up \(removedCount) stale aggregate device(s)")
+        }
     }
 
     /// Start capturing system audio.
