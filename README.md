@@ -70,6 +70,12 @@ Built on a hardened, production-solid foundation:
 
 Grab the latest `.dmg` from [Releases](../../releases), mount it, and drag Caddie to your Applications folder.
 
+> **First launch:** Caddie is not notarized with Apple, so macOS may block it. After dragging to Applications, run this once in Terminal:
+> ```bash
+> xattr -cr /Applications/Caddie.app
+> ```
+> Then open Caddie normally from Launchpad or Applications.
+
 ### Build from Source
 
 ```bash
