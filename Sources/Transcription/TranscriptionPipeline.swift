@@ -20,6 +20,9 @@ enum PipelineError: Error, LocalizedError {
 
 /// Queued actor that processes transcription jobs one at a time.
 /// Pipeline: Mono Mixdown -> ASR -> Diarize -> Merge -> Write DB -> Compress -> Done -> Delete WAV
+///
+/// Uses Task-chaining instead of isProcessing flag to prevent actor reentrancy bugs.
+/// Each enqueue() chains a new Task that waits for the previous one before draining the queue.
 actor TranscriptionPipeline {
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "TranscriptionPipeline")
@@ -28,7 +31,10 @@ actor TranscriptionPipeline {
     private let diarizationEngine: any DiarizationEngineProtocol
 
     private var queue: [(meetingId: String, database: AppDatabase?, onComplete: (@Sendable (String, Result<Void, Error>) -> Void)?)] = []
-    private var isProcessing = false
+
+    /// Serial processing via Task chaining -- eliminates reentrancy race on isProcessing flag.
+    /// Each enqueue() chains a new Task that awaits the previous one before draining.
+    private var processingTask: Task<Void, Never>?
 
     // DATA-08: Bounded queue depth
     private static let maxQueueDepth = 50
@@ -78,18 +84,27 @@ actor TranscriptionPipeline {
         queue.append((meetingId, database, onComplete))
         logger.info("Enqueued meeting \(meetingId) for transcription (queue depth: \(self.queue.count))")
 
-        if !isProcessing {
-            Task { await processNext() }
+        // Chain onto existing processing task, or start a new one.
+        // This guarantees serial execution: each task waits for the previous to finish.
+        let previousTask = processingTask
+        processingTask = Task {
+            await previousTask?.value  // Wait for previous chain to finish
+            await drainQueue()
         }
     }
 
     // MARK: - Private
 
-    private func processNext() async {
-        guard !isProcessing, !queue.isEmpty else { return }
+    /// Drains all queued jobs sequentially. Called from the chained Task.
+    private func drainQueue() async {
+        while !queue.isEmpty {
+            let job = queue.removeFirst()
+            await processJob(job)
+        }
+    }
 
-        isProcessing = true
-        let job = queue.removeFirst()
+    /// Processes a single transcription job.
+    private func processJob(_ job: (meetingId: String, database: AppDatabase?, onComplete: (@Sendable (String, Result<Void, Error>) -> Void)?)) async {
         let meetingId = job.meetingId
         let database = job.database
         let onComplete = job.onComplete
@@ -118,7 +133,6 @@ actor TranscriptionPipeline {
             logger.info("[\(meetingId)] Diarization complete: \(speakerSegments.count) speaker segments")
 
             // DATA-03: Clean up mono file explicitly after BOTH ASR and diarization complete.
-            // Previously used defer{} which ran even if ASR/diarization was still reading the file.
             do {
                 try FileManager.default.removeItem(at: monoURL)
             } catch {
@@ -182,8 +196,6 @@ actor TranscriptionPipeline {
 
         } catch {
             // On failure: do NOT delete mono or WAV -- they must survive for retry.
-            // Mono was already cleaned up after step 3 if ASR+diarization completed.
-            // WAV must ALWAYS survive on error for retry capability.
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             logger.error("[\(meetingId)] Pipeline failed after \(String(format: "%.1f", elapsed))s: \(error.localizedDescription)")
 
@@ -201,12 +213,6 @@ actor TranscriptionPipeline {
             }
 
             onComplete?(meetingId, .failure(error))
-        }
-
-        isProcessing = false
-
-        if !queue.isEmpty {
-            await processNext()
         }
     }
 
