@@ -153,8 +153,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 09-01-PLAN.md -- Stale aggregate device cleanup on app launch (REC-06)
-- [ ] 09-02-PLAN.md -- Device disconnection detection with graceful stop through state machine (REC-05)
+- [x] 09-01-PLAN.md -- Stale aggregate device cleanup on app launch (REC-06)
+- [x] 09-02-PLAN.md -- Device disconnection detection with graceful stop through state machine (REC-05)
 
 ## Progress
 
@@ -179,4 +179,4 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 | 6. Error Discipline | 2/2 | Complete | 2026-03-22 |
 | 7. Precondition Guards | 0/TBD | Not started | - |
 | 8. User Feedback | 2/2 | Complete | 2026-03-22 |
-| 9. Recording Resilience | 0/2 | Not started | - |
+| 9. Recording Resilience | 2/2 | Complete | 2026-03-22 |

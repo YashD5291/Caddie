@@ -21,8 +21,8 @@ Requirements for production-solid release. Each maps to roadmap phases.
 - [x] **REC-02**: SystemAudioCapture render callback safe from use-after-free (no Unmanaged.passUnretained of self)
 - [x] **REC-03**: Recording lifecycle managed by a RecordingCoordinator actor with explicit state machine (idle → recording → transcribing → done/error)
 - [x] **REC-04**: AppState initialization race condition eliminated (pipeline guaranteed ready before meeting lifecycle events fire)
-- [ ] **REC-05**: CoreAudio device disconnection detected mid-recording with graceful stop and user notification
-- [ ] **REC-06**: Stale aggregate device UIDs cleaned up on app launch
+- [x] **REC-05**: CoreAudio device disconnection detected mid-recording with graceful stop and user notification
+- [x] **REC-06**: Stale aggregate device UIDs cleaned up on app launch
 
 ### Data Integrity
 
@@ -96,8 +96,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REC-02 | Phase 3: Audio Thread Safety | Complete |
 | REC-03 | Phase 4: Recording Coordinator | Complete |
 | REC-04 | Phase 4: Recording Coordinator | Complete |
-| REC-05 | Phase 9: Recording Resilience | Pending |
-| REC-06 | Phase 9: Recording Resilience | Pending |
+| REC-05 | Phase 9: Recording Resilience | Complete |
+| REC-06 | Phase 9: Recording Resilience | Complete |
 | DATA-01 | Phase 5: Pipeline Data Integrity | Pending |
 | DATA-02 | Phase 5: Pipeline Data Integrity | Pending |
 | DATA-03 | Phase 5: Pipeline Data Integrity | Pending |
