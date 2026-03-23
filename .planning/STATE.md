@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-stopped_at: Completed 09-02-PLAN.md
-last_updated: "2026-03-22T12:03:33.779Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 10-02-PLAN.md
+last_updated: "2026-03-23T11:36:04.744Z"
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 8
-  total_plans: 19
-  completed_plans: 16
+  total_plans: 22
+  completed_plans: 17
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 09 — recording-resilience (COMPLETE)
+**Current focus:** Phase 10 — bundle-ml-models-in-app-instead-of-runtime-download
 
 ## Current Position
 
-Phase: 09
-Plan: Not started
+Phase: 10 (bundle-ml-models-in-app-instead-of-runtime-download) — EXECUTING
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -63,6 +63,9 @@ Plan: Not started
 | Phase 08 P02 | 5min | 3 tasks | 4 files |
 | Phase 09 P01 | 5min | 2 tasks | 3 files |
 | Phase 09 P02 | 9min | 2 tasks | 5 files |
+| Phase 10 P01 | 4min | 2 tasks | 3 files |
+| Phase 10 P03 | 3min | 2 tasks | 2 files |
+| Phase 10 P02 | 7min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -104,6 +107,13 @@ Recent decisions affecting current work:
 - [Phase 09]: deviceDisconnected reuses stopAndTranscribe side effect -- same outcome as meetingEnded
 - [Phase 09]: Unmanaged.passUnretained(self) for property listener safe because removeDeviceAliveListener is synchronous
 - [Phase 09]: @Sendable on onDeviceDisconnected for Swift 6 strict concurrency compliance
+- [Phase 10]: SRCROOT fallback for standalone script execution outside Xcode
+- [Phase 10]: basedOnDependencyAnalysis: false for idempotent script on every build
+- [Phase 10]: Exclude .mlpackage from resources to prevent Xcode recompilation
+- [Phase 10]: Stable cache key ml-models-parakeet-v3-sortformer-v2 shared between release and CI workflows
+- [Phase 10]: AsrModels.load(from:) takes repo folder directly, derives parent internally via deletingLastPathComponent()
+- [Phase 10]: modelsExist() pre-check prevents DownloadUtils auto-recovery in read-only bundle context
+- [Phase 10]: 5-minute download timeout removed entirely (D-05) -- local I/O does not need timeout
 
 ### Pending Todos
 
@@ -116,6 +126,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-22T11:54:19Z
-Stopped at: Completed 09-02-PLAN.md
+Last session: 2026-03-23T11:36:04.740Z
+Stopped at: Completed 10-02-PLAN.md
 Resume file: None
