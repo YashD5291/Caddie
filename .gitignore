@@ -16,3 +16,6 @@ Package.resolved
 .DS_Store
 .superpowers/
 *.dmg
+
+# ML Models (downloaded during build, ~711MB)
+Resources/Models/
