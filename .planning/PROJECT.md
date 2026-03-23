@@ -20,7 +20,8 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 - ✓ Local SQLite storage with GRDB and FTS5 full-text search — existing
 - ✓ ALAC audio compression — existing
 - ✓ SwiftUI menu bar app with meeting list, detail, audio player, export — existing
-- ✓ Onboarding flow with ML model download — existing
+- ✓ Onboarding flow with ML model loading — Validated in Phase 10: bundle-ml-models
+- ✓ ML models bundled in app (no runtime download) — Validated in Phase 10: bundle-ml-models
 - ✓ Settings view with launch-at-login and data management — existing
 
 ### Active
@@ -32,7 +33,7 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 - [ ] Make transcript persistence critical (DB write failure currently loses transcript)
 - [ ] Fix temp file cleanup timing (defer deletes mono file while diarization may be in-flight)
 - [ ] Add disk space checks before recording
-- [ ] Add model download timeout with progress feedback
+- ✓ Model download timeout removed — models bundled in app (Phase 10)
 - [ ] Bound transcription queue depth
 - [ ] Clean orphaned temp files on app startup
 - [ ] Surface system audio capture failures to user (currently silent mic-only fallback)
@@ -61,7 +62,7 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 ## Constraints
 
 - **Platform**: macOS 14.2+ (Sonoma), Apple Silicon recommended — CoreML/ANE acceleration
-- **Privacy**: All processing on-device, no network calls except model download and Sparkle updates
+- **Privacy**: All processing on-device, no network calls except Sparkle updates (models bundled since Phase 10)
 - **Dependencies**: FluidAudio is the ML backbone — its C dependency (yyjson) causes the test linker issue
 - **Permissions**: Requires Microphone, Screen Recording, Accessibility, Calendar — all via system prompts
 - **Build system**: XcodeGen → Xcode project, SPM for dependencies
@@ -92,4 +93,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-22 after initialization*
+*Last updated: 2026-03-23 after Phase 10 completion — ML models bundled in app, all 10 phases complete*
