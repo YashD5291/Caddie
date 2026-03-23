@@ -369,6 +369,28 @@ final class TranscriptionPipelineTests: XCTestCase {
         }
     }
 
+    func testRejectsDuplicateEnqueueForTranscribingMeeting() async throws {
+        let meetingId = "dup-transcribing-\(UUID().uuidString.prefix(8))"
+        try insertMeeting(meetingId: meetingId, status: .transcribing)
+
+        let expectation = XCTestExpectation(description: "onComplete called with failure")
+        let resultBox = CallbackResultBox()
+
+        await pipeline.enqueue(meetingId: meetingId, database: db) { cbMeetingId, result in
+            resultBox.meetingId = cbMeetingId
+            resultBox.result = result
+            expectation.fulfill()
+        }
+
+        await fulfillment(of: [expectation], timeout: 5.0)
+
+        guard case .failure(let error) = resultBox.result else {
+            XCTFail("Expected .failure for duplicate enqueue of .transcribing meeting")
+            return
+        }
+        XCTAssertTrue(error is PipelineError, "Error should be PipelineError.duplicateEnqueue")
+    }
+
     func testAllowsEnqueueForErrorMeeting() async throws {
         let meetingId = "retry-error-\(UUID().uuidString.prefix(8))"
         try insertMeeting(meetingId: meetingId, status: .error)

@@ -76,7 +76,7 @@ actor TranscriptionPipeline {
             return
         }
 
-        // Check 2: Reject .done meetings via DB (already fully processed)
+        // Check 2: Reject .done and .transcribing meetings via DB
         if let db = database {
             let currentStatus: MeetingStatus?
             do {
@@ -88,7 +88,7 @@ actor TranscriptionPipeline {
                 logger.warning("Failed to check status for \(meetingId): \(error.localizedDescription)")
                 currentStatus = nil
             }
-            if let status = currentStatus, status == .done {
+            if let status = currentStatus, status == .done || status == .transcribing {
                 logger.warning("Meeting \(meetingId) already \(status.rawValue), rejecting duplicate")
                 onComplete?(meetingId, .failure(PipelineError.duplicateEnqueue(meetingId: meetingId, status: status)))
                 return
