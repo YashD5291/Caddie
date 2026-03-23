@@ -56,12 +56,12 @@ final class AppState {
             AudioFileManager.cleanupOrphanedTempFiles() // DATA-05
             SystemAudioCapture.cleanupStaleAggregateDevices() // REC-06
 
-            // 1. Download models (FluidAudio handles caching -- instant if already downloaded)
-            await modelManager.downloadModelsIfNeeded()
+            // 1. Load models from app bundle (D-04: bundle-based, no network)
+            await modelManager.loadModelsFromBundle()
 
-            if let downloadError = modelManager.downloadError {
-                initError = "Model download failed: \(downloadError)"
-                logger.error("Model download failed: \(downloadError)")
+            if let loadError = modelManager.loadError {
+                initError = "Model loading failed: \(loadError)"
+                logger.error("Model loading failed: \(loadError)")
                 return
             }
 

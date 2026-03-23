@@ -78,7 +78,7 @@ struct OnboardingView: View {
             Button {
                 if permissionsGranted {
                     showModelDownload = true
-                    Task { await appState.modelManager.downloadModelsIfNeeded() }
+                    Task { await appState.modelManager.loadModelsFromBundle() }
                 } else {
                     requestPermissions()
                 }
@@ -106,12 +106,12 @@ struct OnboardingView: View {
     @ViewBuilder
     private var modelDownloadSection: some View {
         VStack(spacing: 16) {
-            if let error = appState.modelManager.downloadError {
+            if let error = appState.modelManager.loadError {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 32))
                     .foregroundStyle(.red)
 
-                Text("Download Failed")
+                Text("Model Loading Failed")
                     .font(.headline)
 
                 Text(error)
@@ -120,8 +120,8 @@ struct OnboardingView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 350)
 
-                Button("Retry Download") {
-                    Task { await appState.modelManager.downloadModelsIfNeeded() }
+                Button("Retry Loading") {
+                    Task { await appState.modelManager.loadModelsFromBundle() }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
@@ -141,19 +141,19 @@ struct OnboardingView: View {
                 .tint(.orange)
                 .controlSize(.large)
             } else {
-                Text("Downloading AI Models")
+                Text("Loading AI Models")
                     .font(.headline)
 
-                Text("This is a one-time download (~1 GB).\nModels run entirely on your Mac.")
+                Text("Preparing speech recognition...")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
-                ProgressView(value: appState.modelManager.downloadProgress)
+                ProgressView(value: appState.modelManager.loadProgress)
                     .frame(maxWidth: 300)
                     .padding(.vertical, 8)
 
-                Text("\(Int(appState.modelManager.downloadProgress * 100))%")
+                Text("\(Int(appState.modelManager.loadProgress * 100))%")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
