@@ -4,47 +4,50 @@ import XCTest
 @MainActor
 final class ModelManagerTests: XCTestCase {
 
-    // MARK: - Timeout Mechanism
+    // MARK: - ModelLoadError Descriptions
 
-    func testDownloadTimesOutAfterDeadline() async throws {
-        // Test the timeout mechanism directly: a slow operation should be cancelled
-        let manager = ModelManager()
-
-        do {
-            try await manager.withTimeout(seconds: 1) {
-                // Simulate a download that takes way too long
-                try await Task.sleep(nanoseconds: 60 * 1_000_000_000)
-                return ()
-            }
-            XCTFail("Expected timeout error to be thrown")
-        } catch let error as ModelDownloadError {
-            guard case .timedOut(let seconds) = error else {
-                XCTFail("Expected .timedOut error, got \(error)")
-                return
-            }
-            XCTAssertEqual(seconds, 1)
-        }
-    }
-
-    func testTimeoutErrorMessageContainsRetryGuidance() {
-        let error = ModelDownloadError.timedOut(seconds: 300)
+    func testBundleNotFoundErrorDescription() {
+        let error = ModelLoadError.bundleNotFound
         let description = error.errorDescription ?? ""
-
         XCTAssertTrue(
-            description.contains("timed out"),
-            "Error should mention 'timed out', got: \(description)"
-        )
-        XCTAssertTrue(
-            description.contains("Retry"),
-            "Error should mention 'Retry', got: \(description)"
-        )
-        XCTAssertTrue(
-            description.contains("5 minutes"),
-            "Error should mention '5 minutes', got: \(description)"
+            description.contains("Model bundle directory not found"),
+            "Expected 'Model bundle directory not found' in: \(description)"
         )
     }
 
-    func testTimeoutConstantIsFiveMinutes() {
-        XCTAssertEqual(ModelManager.downloadTimeoutSeconds, 300, "Download timeout should be 5 minutes (300 seconds)")
+    func testModelsNotFoundErrorDescription() {
+        let error = ModelLoadError.modelsNotFound("ASR models missing at /path")
+        let description = error.errorDescription ?? ""
+        XCTAssertTrue(
+            description.contains("Model files missing from app bundle"),
+            "Expected 'Model files missing from app bundle' in: \(description)"
+        )
+        XCTAssertTrue(
+            description.contains("ASR"),
+            "Expected error detail in description: \(description)"
+        )
+    }
+
+    func testLoadFailedErrorDescription() {
+        let error = ModelLoadError.loadFailed("corrupt file")
+        let description = error.errorDescription ?? ""
+        XCTAssertTrue(
+            description.contains("Failed to load models"),
+            "Expected 'Failed to load models' in: \(description)"
+        )
+        XCTAssertTrue(
+            description.contains("corrupt file"),
+            "Expected error detail in description: \(description)"
+        )
+    }
+
+    // MARK: - ModelManager Initial State
+
+    func testInitialState() {
+        let manager = ModelManager()
+        XCTAssertFalse(manager.isLoading)
+        XCTAssertEqual(manager.loadProgress, 0)
+        XCTAssertNil(manager.loadError)
+        XCTAssertFalse(manager.modelsReady)
     }
 }

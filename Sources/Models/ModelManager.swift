@@ -3,15 +3,21 @@ import os
 import Observation
 import FluidAudio
 
-// MARK: - ModelDownloadError
+// MARK: - ModelLoadError
 
-enum ModelDownloadError: Error, LocalizedError, Sendable {
-    case timedOut(seconds: UInt64)
+enum ModelLoadError: Error, LocalizedError, Sendable {
+    case bundleNotFound
+    case modelsNotFound(String)
+    case loadFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case .timedOut(let seconds):
-            return "Model download timed out after \(seconds / 60) minutes. Check your internet connection and tap Retry."
+        case .bundleNotFound:
+            return "Model bundle directory not found in app resources"
+        case .modelsNotFound(let detail):
+            return "Model files missing from app bundle: \(detail)"
+        case .loadFailed(let detail):
+            return "Failed to load models: \(detail)"
         }
     }
 }
@@ -21,11 +27,9 @@ enum ModelDownloadError: Error, LocalizedError, Sendable {
 @MainActor
 @Observable
 final class ModelManager {
-    static let downloadTimeoutSeconds: UInt64 = 300  // 5 minutes
-
-    var isDownloading = false
-    var downloadProgress: Double = 0
-    var downloadError: String?
+    var isLoading = false
+    var loadProgress: Double = 0
+    var loadError: String?
     var modelsReady = false
 
     private(set) var asrModels: AsrModels?
@@ -33,73 +37,63 @@ final class ModelManager {
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "ModelManager")
 
-    // MARK: - Timeout Helper
+    // MARK: - Bundle Loading
 
-    func withTimeout<T: Sendable>(
-        seconds: UInt64,
-        operation: @escaping @Sendable () async throws -> T
-    ) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask {
-                try await operation()
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-                throw ModelDownloadError.timedOut(seconds: seconds)
-            }
-            // First to finish wins -- the other is cancelled
-            let result = try await group.next()!
-            group.cancelAll()
-            return result
-        }
-    }
-
-    // MARK: - Download
-
-    /// Downloads and loads ASR + diarization models via FluidAudio.
-    /// Models are cached by FluidAudio after first download.
-    /// Safe to call multiple times — returns immediately if already downloaded.
-    /// Times out after 5 minutes with a user-visible error and retry option.
-    func downloadModelsIfNeeded() async {
+    /// Loads ASR and diarization models from the app bundle.
+    /// Models must be present at Bundle.main.resourceURL/Models/.
+    /// Safe to call multiple times -- returns immediately if already loaded.
+    func loadModelsFromBundle() async {
         guard !modelsReady else {
             logger.info("Models already loaded")
             return
         }
 
-        isDownloading = true
-        downloadProgress = 0
-        downloadError = nil
+        isLoading = true
+        loadProgress = 0
+        loadError = nil
 
         do {
-            try await withTimeout(seconds: Self.downloadTimeoutSeconds) { [self] in
-                // Step 1: Download ASR models (~60% of total)
-                logger.info("Downloading ASR models...")
-                let models = try await AsrModels.downloadAndLoad(version: .v3)
-                await MainActor.run {
-                    self.asrModels = models
-                    self.downloadProgress = 0.6
-                }
-                logger.info("ASR models downloaded and loaded")
-
-                // Step 2: Download and initialize Sortformer diarizer (~40% of total)
-                logger.info("Initializing diarizer...")
-                let sortformerModels = try await SortformerModels.loadFromHuggingFace(
-                    config: .default
-                )
-                let sortformer = SortformerDiarizer(config: .default)
-                sortformer.initialize(models: sortformerModels)
-                await MainActor.run {
-                    self.diarizer = sortformer
-                    self.downloadProgress = 1.0
-                }
-                logger.info("Diarizer initialized")
+            guard let modelsDir = Bundle.main.resourceURL?
+                .appendingPathComponent("Models") else {
+                throw ModelLoadError.bundleNotFound
             }
+
+            // Step 1: Load ASR models (~60% of work)
+            let asrDir = modelsDir.appendingPathComponent("parakeet-tdt-0.6b-v3-coreml")
+
+            // CRITICAL: Pre-check that ASR model files exist before calling load().
+            // Without this guard, a missing-models condition triggers FluidAudio's
+            // DownloadUtils auto-recovery (Pitfall 1 from RESEARCH.md): it attempts
+            // to delete the bundle directory and re-download from HuggingFace, which
+            // fails silently in a read-only app bundle context.
+            guard AsrModels.modelsExist(at: asrDir, version: .v3) else {
+                throw ModelLoadError.modelsNotFound("ASR models missing at \(asrDir.path)")
+            }
+
+            logger.info("Loading ASR models from bundle...")
+            let models = try await AsrModels.load(from: asrDir, version: .v3)
+            asrModels = models
+            loadProgress = 0.6
+            logger.info("ASR models loaded")
+
+            // Step 2: Load Sortformer models (~40% of work)
+            logger.info("Loading diarization models from bundle...")
+            let sortformerModels = try await SortformerModels.loadFromHuggingFace(
+                config: .default,
+                cacheDirectory: modelsDir
+            )
+            let sortformer = SortformerDiarizer(config: .default)
+            sortformer.initialize(models: sortformerModels)
+            diarizer = sortformer
+            loadProgress = 1.0
+            logger.info("Diarization models loaded")
+
             modelsReady = true
         } catch {
-            downloadError = error.localizedDescription
-            logger.error("Model download failed: \(error.localizedDescription)")
+            loadError = error.localizedDescription
+            logger.error("Model loading failed: \(error.localizedDescription)")
         }
 
-        isDownloading = false
+        isLoading = false
     }
 }
