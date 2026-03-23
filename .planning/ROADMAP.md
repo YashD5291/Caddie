@@ -156,6 +156,18 @@ Plans:
 - [x] 09-01-PLAN.md -- Stale aggregate device cleanup on app launch (REC-06)
 - [x] 09-02-PLAN.md -- Device disconnection detection with graceful stop through state machine (REC-05)
 
+### Phase 10: Bundle ML models in app instead of runtime download
+
+**Goal:** Models bundled in .app at build time via download script -- zero network dependency after install
+**Requirements**: D-01, D-02, D-03, D-04, D-05, D-06, D-07, D-08, D-09, D-10, D-11, D-12
+**Depends on:** Phase 9
+**Plans:** 3 plans
+
+Plans:
+- [ ] 10-01-PLAN.md -- Build-phase download script + project.yml preBuildScript + .gitignore (D-01, D-02, D-10)
+- [ ] 10-02-PLAN.md -- ModelManager bundle-based loading + OnboardingView copy updates + tests (D-03 through D-09)
+- [ ] 10-03-PLAN.md -- CI workflow model caching and timeout adjustments (D-11, D-12)
+
 ## Progress
 
 **Execution Order:**
@@ -166,7 +178,7 @@ Phases execute in numeric order. Phases 3, 5, 6, 7, 9 can parallelize where depe
 Phase 1 ──> Phase 2 ──> Phase 4 ──> Phase 5 ──> Phase 8
 Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
                          Phase 4 ──> Phase 7
-                         Phase 4 ──> Phase 9
+                         Phase 4 ──> Phase 9 ──> Phase 10
 ```
 
 | Phase | Plans Complete | Status | Completed |
@@ -180,13 +192,4 @@ Phase 1 ──> Phase 3 ──> Phase 4 ──> Phase 6 ──> Phase 8
 | 7. Precondition Guards | 0/TBD | Not started | - |
 | 8. User Feedback | 2/2 | Complete | 2026-03-22 |
 | 9. Recording Resilience | 2/2 | Complete | 2026-03-22 |
-
-### Phase 10: Bundle ML models in app instead of runtime download
-
-**Goal:** [To be planned]
-**Requirements**: TBD
-**Depends on:** Phase 9
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd:plan-phase 10 to break down)
+| 10. Bundle ML Models | 0/3 | Not started | - |
