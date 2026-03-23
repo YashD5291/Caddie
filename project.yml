@@ -40,6 +40,10 @@ targets:
   Caddie:
     type: application
     platform: macOS
+    preBuildScripts:
+      - name: Download ML Models
+        script: "${SRCROOT}/scripts/download-models.sh"
+        basedOnDependencyAnalysis: false
     sources:
       - Sources
       - path: Resources/Assets.xcassets
@@ -47,6 +51,7 @@ targets:
       - path: Resources
         excludes:
           - "Assets.xcassets"
+          - "Models/**/*.mlpackage"
     dependencies:
       - package: GRDB
       - package: SimplyCoreAudio
