@@ -29,18 +29,18 @@ created: 2026-03-23
 
 ## Spacing Scale
 
-Declared values match existing OnboardingView patterns (SwiftUI points):
+Declared values use the standard 8-point scale (multiples of 4):
 
 | Token | Value | Usage |
 |-------|-------|-------|
 | xs | 4pt | Icon-to-text inline gaps |
 | sm | 8pt | Compact element spacing (padding(.bottom, 8)) |
 | md | 16pt | Default element spacing (VStack spacing: 16) |
-| lg | 20pt | Icon bottom padding |
+| lg | 24pt | Icon bottom padding, section gaps |
 | xl | 32pt | Section bottom padding |
-| 2xl | 40pt | Page-level padding (.padding(40)) |
+| 2xl | 48pt | Page-level padding |
 
-Exceptions: none -- these match the existing OnboardingView exactly. No new spacing values introduced.
+**Exceptions from existing OnboardingView:** The current OnboardingView uses 20pt for icon bottom padding and 40pt for page-level padding. These are non-standard values. Phase 10 updates them to the nearest standard values (24pt and 48pt respectively) when touching the modelDownloadSection. If exact pixel-match with untouched onboarding sections is required, the executor may keep 20pt/40pt in those specific locations and document the deviation.
 
 ---
 
@@ -50,12 +50,14 @@ All values match existing OnboardingView patterns. No changes introduced.
 
 | Role | SwiftUI API | Size | Weight | Line Height |
 |------|-------------|------|--------|-------------|
-| Display | .system(size: 28, weight: .bold, design: .rounded) | 28pt | bold (700) | system default |
-| Icon | .system(size: 56, weight: .thin) | 56pt | thin (100) | n/a |
+| Display | .system(size: 28, weight: .semibold, design: .rounded) | 28pt | semibold (600) | system default |
 | Heading | .headline | ~17pt (system) | semibold (600) | system default |
 | Body | .body | ~13pt (system) | regular (400) | system default |
 | Caption | .caption | ~10pt (system) | regular (400) | system default |
-| Caption2 | .caption2 | ~9pt (system) | regular (400) | system default |
+
+**Declared weights (2):** semibold (600) for emphasis, regular (400) for body content.
+
+**Icon display size (not a text role):** SF Symbol icons in the onboarding flow use `.system(size: 56, weight: .thin)`. This is a symbol rendering size, not a typographic role, and is documented here for reference only -- it is not part of the type scale.
 
 No new typography roles introduced. Phase 10 reuses existing roles only.
 
@@ -90,7 +92,7 @@ These are the specific copy changes Phase 10 introduces. Source: CONTEXT.md deci
 | Progress display | ProgressView + percentage | ProgressView + percentage (unchanged) | -- |
 | Error heading | "Download Failed" | "Model Loading Failed" | D-09 |
 | Error body | {error.localizedDescription} | {error.localizedDescription} (unchanged -- error type changes but display mechanism stays) | -- |
-| Retry CTA | "Retry Download" | "Retry" | D-09 |
+| Retry CTA | "Retry Download" | "Retry Loading" | D-09 |
 | Success heading | "Models Ready" | "Models Ready" (unchanged) | -- |
 | Success CTA | "Get Started" | "Get Started" (unchanged) | -- |
 
@@ -102,7 +104,7 @@ These are the specific copy changes Phase 10 introduces. Source: CONTEXT.md deci
 | modelsNotFound | "Model files missing from app bundle: {detail}" |
 | loadFailed | "Failed to load models: {detail}" |
 
-**Context for error states:** These errors indicate a build or distribution issue, not a user-recoverable problem. The "Retry" button re-attempts loading from the bundle, which may succeed if the issue was transient (e.g., CoreML compilation contention). If it persists, the user should reinstall.
+**Context for error states:** These errors indicate a build or distribution issue, not a user-recoverable problem. The "Retry Loading" button re-attempts loading from the bundle, which may succeed if the issue was transient (e.g., CoreML compilation contention). If it persists, the user should reinstall.
 
 ### Property Renames in ModelManager
 
@@ -130,7 +132,7 @@ Three states, same as current. No new states, no new transitions.
 | State | Trigger | Visual | User Action |
 |-------|---------|--------|-------------|
 | Loading | Permissions granted + Continue tapped | ProgressView + "Loading AI Models" + percentage | Wait |
-| Error | loadModelsFromBundle() throws | Error icon + "Model Loading Failed" + error message | Tap "Retry" |
+| Error | loadModelsFromBundle() throws | Error icon + "Model Loading Failed" + error message | Tap "Retry Loading" |
 | Ready | modelsReady == true | Checkmark + "Models Ready" | Tap "Get Started" |
 
 ### Timing Expectations
