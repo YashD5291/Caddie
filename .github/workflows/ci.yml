@@ -14,7 +14,7 @@ jobs:
   build-and-test:
     name: Build & Test
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -25,6 +25,14 @@ jobs:
 
       - name: Generate Xcode Project
         run: xcodegen generate
+
+      - name: Cache ML Models
+        uses: actions/cache@v4
+        with:
+          path: Resources/Models
+          key: ml-models-parakeet-v3-sortformer-v2
+          restore-keys: |
+            ml-models-
 
       - name: Build
         run: |
