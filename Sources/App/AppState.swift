@@ -152,6 +152,15 @@ final class AppState {
 
     // MARK: - UI Actions (delegate to coordinator)
 
+    func startManualRecording() {
+        currentMeetingTitle = "Manual Recording"
+        Task { await coordinator?.startManualRecording() }
+    }
+
+    func stopManualRecording() {
+        Task { await coordinator?.stopManualRecording() }
+    }
+
     func stopRecording() {
         Task { await coordinator?.stopRecording() }
     }

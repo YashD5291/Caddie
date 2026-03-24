@@ -116,6 +116,16 @@ actor RecordingCoordinator {
         await handle(.retryRequested(meetingId: meetingId))
     }
 
+    /// Start a manual recording (bypasses MeetingDetector).
+    func startManualRecording(title: String = "Manual Recording") async {
+        await handle(.manualStart(title: title))
+    }
+
+    /// Stop a manual recording explicitly.
+    func stopManualRecording() async {
+        await handle(.manualStop)
+    }
+
     // MARK: - Precondition Checks
 
     private static let minimumDiskSpaceBytes: Int64 = 500 * 1024 * 1024  // 500 MB
