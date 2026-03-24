@@ -45,8 +45,8 @@ final class DiarizationEngine: DiarizationEngineProtocol, @unchecked Sendable {
                 for segment in speaker.finalizedSegments {
                     rawSegments.append((
                         speakerIndex: speakerIndex,
-                        startTime: Float(segment.startTime),
-                        endTime: Float(segment.endTime)
+                        startTime: segment.startTime,
+                        endTime: segment.endTime
                     ))
                 }
             }

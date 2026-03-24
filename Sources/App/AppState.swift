@@ -88,11 +88,13 @@ final class AppState {
 
             // 5. Create coordinator with all dependencies -- eliminates init race (REC-04)
             // All deps are non-optional: coordinator cannot exist without a working pipeline
+            let deviceManager = audioDeviceManager
             let newCoordinator = RecordingCoordinator(
                 database: database!,
                 recorder: AudioRecorder(),
                 pipeline: pipeline,
-                detector: MeetingDetector()
+                detector: MeetingDetector(),
+                audioDeviceManager: deviceManager
             )
 
             // 6. Wire coordinator state changes to observable properties

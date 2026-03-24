@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Google Calendar + Remote Meeting Recording
-status: Ready to execute
-stopped_at: Completed 12-01-PLAN.md
-last_updated: "2026-03-24T11:22:06.439Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 12-02-PLAN.md
+last_updated: "2026-03-24T12:07:02.735Z"
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -55,6 +55,7 @@ Plan: 2 of 2
 
 | Phase 11 P01 | 29min | 2 tasks | 5 files |
 | Phase 12 P01 | 23min | 1 tasks | 3 files |
+| Phase 12 P02 | 35min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,9 @@ Recent decisions affecting current work:
 - [Phase 11]: Filter only Caddie aggregate devices by UID prefix, keep user aggregate devices
 - [Phase 12]: Raw CoreAudio kAudioHardwarePropertyDeviceForUID for UID resolution instead of SimplyCoreAudio (objectID is internal)
 - [Phase 12]: Dual start paths via method overload (not boolean flag) -- cleaner API, zero v1.0 regression risk
+- [Phase 12]: Raw CoreAudio AudioValueTranslation for UID resolution in SystemAudioCapture (consistent with MicrophoneCapture)
+- [Phase 12]: Default nil parameters on AudioRecorder.start() for full backward compatibility
+- [Phase 12]: processID + systemDeviceUID conflict throws explicitly rather than silently preferring one
 
 ### Pending Todos
 
@@ -87,6 +91,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T11:22:06.436Z
-Stopped at: Completed 12-01-PLAN.md
+Last session: 2026-03-24T12:07:02.732Z
+Stopped at: Completed 12-02-PLAN.md
 Resume file: None

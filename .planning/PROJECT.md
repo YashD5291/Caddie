@@ -34,20 +34,44 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 
 ### Active
 
-- [ ] Calendar notification prompts before meetings
-- [ ] AI summaries / action items
-- [ ] Recording session crash recovery
-- [ ] Automatic transcription retry with backoff
-- [ ] Proactive disk space monitoring during recording
-- [ ] Structured error logging to file for bug reports
-- [ ] Recording health dashboard in Settings
+- [ ] Google Calendar integration (OAuth2, read meetings, auto-trigger recording)
+- [ ] Audio device picker (select Loopback/Jump Desktop device as capture source)
+- [ ] Calendar-based meeting detection (replaces local app detection as primary)
+- [ ] Pre-meeting notification before recording starts
+- [ ] Manual start/stop recording from menu bar
+- [ ] Calendar event metadata in meeting list (title, attendees)
+
+### Future
+
+- AI summaries / action items
+- Recording session crash recovery
+- Automatic transcription retry with backoff
+- Proactive disk space monitoring during recording
+- Structured error logging to file for bug reports
+- Recording health dashboard in Settings
 
 ### Out of Scope
 
 - Cloud sync — core value is local-only, privacy-first
 - Multi-platform — macOS only
 - Real-time transcription — architecturally different pipeline
-- Multi-language transcription UI — feature scope, not hardening
+- Multi-language transcription UI — feature scope
+- Browser extension for calendar — native OAuth preferred
+
+## Current Milestone: v2.0 Google Calendar + Remote Meeting Recording
+
+**Goal:** Caddie detects meetings from Google Calendar and records from a user-selected audio device (Loopback virtual device for Jump Desktop) — fully automatic.
+
+**Target features:**
+- Google OAuth2 sign-in for calendar access
+- Read upcoming meetings from Google Calendar
+- Auto-start recording when a calendar meeting begins
+- Audio device picker in settings (select Loopback device for Jump Desktop audio)
+- Pre-meeting notification ("Recording starts in 2 min")
+- Manual start/stop recording from menu bar
+- Meeting list shows calendar event metadata (title, attendees)
+
+**User context:** User joins meetings on remote PC via Jump Desktop, with Loopback virtual device routing Jump Desktop audio to Mac. Caddie runs on the local Mac.
 
 ## Context
 
@@ -60,7 +84,7 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 ## Constraints
 
 - **Platform**: macOS 14.2+ (Sonoma), Apple Silicon recommended — CoreML/ANE acceleration
-- **Privacy**: All processing on-device, no network calls except Sparkle updates
+- **Privacy**: All processing on-device, network only for Google Calendar API, Sparkle updates
 - **Dependencies**: FluidAudio is the ML backbone — yyjson linker issue resolved via selective coverage
 - **Permissions**: Requires Microphone, Screen Recording, Accessibility, Calendar — all via system prompts
 - **Build system**: XcodeGen → Xcode project, SPM for dependencies, preBuildScript for model download
@@ -95,4 +119,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-24 after v1.0 milestone completion*
+*Last updated: 2026-03-24 after v2.0 milestone start*

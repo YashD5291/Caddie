@@ -1,163 +1,169 @@
-# Feature Landscape
+# Feature Landscape: v2.0 Google Calendar + Audio Device Selection
 
-**Domain:** macOS meeting recorder reliability and error handling hardening
-**Researched:** 2026-03-22
+**Domain:** macOS meeting recorder -- calendar-driven recording with configurable audio devices
+**Researched:** 2026-03-24
+**Confidence:** HIGH (existing codebase deeply understood, Google APIs well-documented, audio APIs already in use)
+
+## User Context
+
+The user joins meetings on a remote PC via Jump Desktop. Audio from the remote PC is routed through Rogue Amoeba Loopback, which creates a virtual audio device on the local Mac. Caddie runs on the local Mac and must capture audio from that Loopback virtual device. Meetings appear on Google Calendar, not the local macOS calendar.
+
+**Current limitation:** Caddie detects meetings by monitoring local audio processes (Zoom, Teams, etc.) + microphone state + window titles + local EventKit calendar. None of these fire when the meeting runs on a remote machine. The user needs calendar-driven detection + explicit audio device selection.
 
 ## Table Stakes
 
-Features users expect. Missing = product feels incomplete or users lose data.
+Features users expect for a calendar-integrated meeting recorder. Missing = product feels broken for the stated use case.
 
-These are non-negotiable for a meeting recorder whose core value is "every meeting must be reliably captured." Any failure here means a user trusts Caddie, goes into a meeting, and comes out with nothing.
-
-### Data Integrity
-
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Critical DB write gating | DB insert failure during `startRecording` must abort recording, not continue silently. A recording with no DB record produces an orphaned audio file and a transcript write to a nonexistent row. | Low | Currently recording proceeds even when DB insert fails (CONCERNS.md). Make DB record creation a precondition. |
-| Transcript persistence as blocking step | If the DB write after transcription fails, the transcript is lost forever because source WAV/mono files get deleted downstream. Pipeline must treat DB write failure as a pipeline failure and preserve source files. | Medium | TranscriptionPipeline.swift lines 87-100 write transcript, but lines 104-112 delete source files regardless of write success. Restructure to: write DB -> only then compress -> only then delete WAV. |
-| Safe temp file lifecycle | `defer` block deletes mono file while diarization may still be reading it. Crash between creation and cleanup leaves orphaned files. | Medium | Two fixes: (1) explicit cleanup after both ASR and diarization complete (not `defer`), (2) startup sweep of `caddie_mono_*` files in temp directory. |
-| Orphaned temp file cleanup on startup | Crashed sessions leave `caddie_mono_*.wav` files in system temp forever. Over time this silently consumes disk. | Low | Add `AudioFileManager.cleanupOrphanedTempFiles()` call in AppState init. Pattern: delete files matching `caddie_mono_` prefix older than 1 hour. |
-| Crash-safe recording format | WAV files are not crash-safe -- if the app crashes mid-recording, the WAV header may be invalid and the entire recording is lost. WAV requires a valid header with final file size written at close. | Medium | OBS uses MKV (container that does not need finalization) and auto-remuxes after. For audio-only, consider periodic header updates or writing to a crash-tolerant container format. Alternatively, write raw PCM and finalize WAV on `stop()` -- if crash occurs, raw PCM can be recovered. |
-
-### Error Recovery
-
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Retry transcription with valid state | Retry button exists in UI but `retryTranscription` may use a stale database reference. Retry must refresh DB connection and verify WAV file exists before re-enqueuing. | Low | AppState.swift line 123 passes potentially stale DB ref. |
-| Bounded transcription queue | Unbounded queue can grow without limit if many meetings end during batch scenarios. | Low | Add `maxQueueDepth` constant (e.g., 50). Log warning and reject when full. |
-| Idempotent pipeline processing | If a meeting is retried or double-enqueued, the pipeline must not corrupt state. Check if meeting is already `.transcribing` or `.done` before starting. | Low | Guard at pipeline entry: skip if status is already `.transcribing` or `.done`. |
-| Eliminate force unwraps on directory access | Four `.first!` calls on `applicationSupportDirectory` will crash the app if the filesystem returns empty (rare, but fatal). | Low | Replace with `guard let ... else { throw }` pattern. Already specified in CONCERNS.md. |
-| Replace silent `try?` with logged `do-catch` | 14 instances of `try?` suppress errors without logging. Makes diagnosing production failures impossible. | Low | Systematic replacement. Each `try?` becomes `do { try ... } catch { logger.warning/error(...) }`. |
-| Fix weak self nil access in signal handlers | Meeting detection callbacks silently do nothing if `self` is deallocated. This means a meeting starts but recording does not, or a meeting ends but transcription is never enqueued. | Low | Add `guard let self = self else { return }` to all closure callbacks in MeetingDetector, CalendarMonitor, AudioProcessMonitor, AppState. |
-
-### User Feedback
-
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Disk space check before recording | Recording on a full disk fails mid-way with no warning. Loom blocks recording below 2GB free and warns below 16GB (with SCK). For audio-only recording, a 500MB minimum is reasonable. | Low | Check `FileManager.default.attributesOfFileSystem` for free space. Block recording and show alert if below threshold. |
-| System audio capture status indicator | System audio capture silently falls back to mic-only. User thinks they have stereo but only has mic audio. This is the #1 complaint pattern in macOS recorder apps. | Medium | Track `systemAudioActive` boolean in AudioRecorder. Surface in menu bar: "Recording (mic only)" vs "Recording (system + mic)". Show a one-time notification when fallback occurs. |
-| Transcription progress in UI | Menu bar shows "Transcribing..." with no progress or ETA. For a 1-hour meeting, transcription can take 5-15 minutes. Users wonder if it is frozen. | Medium | Expose pipeline step as observable state: "Creating mixdown...", "Transcribing audio...", "Identifying speakers...", "Compressing...". Show in menu bar and MeetingDetailView. |
-| Recording duration in menu bar | Already partially implemented -- MenuBarView shows duration. Verify it updates live with a timer. | Low | Currently uses `appState.recordingDuration`. Ensure this is a published property updated by a Timer. |
-
-### Testing Infrastructure
-
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Fix test target linker error | Tests cannot execute at all due to yyjson (C dep of FluidAudio) failing to link with code coverage. Zero test coverage is unacceptable for a reliability milestone. | High | Root cause: yyjson is a C library that does not link properly when code coverage instrumentation is enabled. Options: (1) disable coverage for the FluidAudio module, (2) create a separate test target that excludes FluidAudio, (3) use protocol-based DI to mock ML engines so tests never import FluidAudio directly. Option 3 is best -- it also enables testing the pipeline without real ML models. |
-| Protocol-based dependency injection for ML engines | ASREngine and DiarizationEngine are concrete types. Tests cannot substitute mock implementations. | Medium | Define `ASREngineProtocol` and `DiarizationEngineProtocol`. TranscriptionPipeline takes protocols. Test target provides mock implementations that return canned results. This also breaks the FluidAudio linker dependency in tests. |
-| Database migration tests | No tests verify schema migrations. A bad migration corrupts every user's database on update. | Medium | Create test that applies migrations sequentially on an in-memory GRDB database. Verify schema after each migration. GRDB's `DatabaseQueue(configuration:)` supports in-memory databases. |
-| Pipeline error path tests | Only basic enqueue logic is tested. Error recovery, failed compression, concurrent enqueue, status update failures are all untested. | Medium | Use mock ASR/diarization engines that throw specific errors. Verify pipeline sets correct status, preserves source files on failure, processes queue correctly after errors. |
+| Feature | Why Expected | Complexity | Dependencies | Notes |
+|---------|--------------|------------|--------------|-------|
+| Google OAuth2 sign-in | Users must authenticate to access their calendar. Every calendar-integrated app does this. | Medium | New: OAuth2 module (loopback IP + PKCE) | Desktop apps use loopback redirect (`http://127.0.0.1:port`) with PKCE. Google deprecated custom URI schemes. Must open system browser, not embedded WebView. Token + refresh token stored in Keychain. |
+| Calendar event list (upcoming meetings) | Users need to see what meetings Caddie knows about. Without visibility, they can't trust auto-recording. | Low | Google OAuth2 token, Google Calendar API `events.list` | Use `calendar.events.readonly` scope (most restrictive). Initial full sync, then incremental via `syncToken`. Poll every 5 minutes (Google recommends minimizing polling). |
+| Calendar-triggered auto-start recording | The core value: meeting starts, recording starts -- no manual intervention. This is the entire point of the milestone. | High | Calendar event list, audio device selection, RecordingCoordinator | Schedule recording start at event `startTime`. Use `UNUserNotificationCenter` to schedule time-based local notification. Must handle: early joins, late starts, event time changes, cancelled events. |
+| Audio device picker (system audio source) | User must select the Loopback virtual device as the capture source instead of the default process tap. Without this, Caddie captures nothing from Jump Desktop. | Medium | SimplyCoreAudio (already a dependency), SystemAudioCapture refactor | Enumerate input devices via SimplyCoreAudio. Present SwiftUI Picker in Settings. Store selected device UID in UserDefaults. Pass to SystemAudioCapture as device-based capture instead of process-based tap. |
+| Audio device picker (microphone source) | When using a virtual audio setup, the user may also need a non-default microphone. Loopback can route mic audio too. | Low | SimplyCoreAudio, MicrophoneCapture refactor | AVAudioEngine uses system default input. Must set specific device via `kAudioOutputUnitProperty_CurrentDevice` on the underlying AudioUnit. |
+| Pre-meeting notification | Users need a heads-up that recording is about to start. Recording without warning feels invasive, even to the user themselves. MacWhisper, Granola, and Krisp all do this. | Low | Calendar event list, UNUserNotificationCenter | Schedule notification 2 minutes before meeting start. Actionable: "Recording starts in 2 min" with option to skip. Use `UNNotificationAction` for "Skip" button. |
+| Manual start/stop recording | Fallback for ad-hoc meetings not on calendar, or when auto-detection misses. Every competitor has this. MacWhisper requires it; Granola offers it as override. | Low | RecordingCoordinator (add `manualStart` event) | Add "Start Recording" / "Stop Recording" to MenuBarView. Trigger `RecordingEvent.manualStart` in coordinator. Title defaults to "Manual Recording" or user-entered title. |
+| Calendar event metadata in meeting list | Meeting list must show calendar title + attendees, not just "Unknown Meeting". Gives context when reviewing recordings. | Low | Meeting model migration, Calendar event data | Add `attendees: String?` and `calendarEventId: String?` columns to `meetings` table. Store JSON-encoded attendee list. Display in MeetingDetailView. |
 
 ## Differentiators
 
-Features that set the product apart. Not expected by default, but significantly improve trust and reliability perception.
+Features that set Caddie apart from competitors. Not expected by users, but valued when present.
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| Recording health dashboard in settings | Show recording history with success/failure stats, disk usage trend, orphaned file count. Builds trust that the app is working correctly. Most recorders only show individual meeting status -- a health overview is rare. | Medium | Query DB for meeting count by status. Calculate audio storage size. Show in SettingsView. |
-| Proactive disk space monitoring during recording | Check disk space periodically (every 60s) while recording. If space drops below threshold, show notification and stop recording gracefully (finalize WAV) rather than crashing. Loom does this; most local-first recorders do not. | Medium | Timer during recording that checks available space. On low space: (1) finalize current WAV, (2) show UNUserNotification, (3) set meeting to error state with descriptive message. |
-| Recording session state persistence | If Caddie crashes or macOS kills it during recording, on next launch detect the incomplete session and offer to recover the audio. QuickTime stores autosave data in `~/Library/Containers/.../Autosave Information/`. | High | Write recording state (meetingId, wav path, start time) to a plist/UserDefaults. On launch, check for incomplete sessions. If WAV exists and has data, offer recovery. If WAV is corrupt, clean up and notify user. |
-| Structured error logging to file | Current logging uses `os.Logger` which is great for Console.app but hard for users to share when reporting bugs. Write errors to a structured log file that can be attached to bug reports. | Medium | Already have `CaddieLogger.showLogs()` pointing to `~/Library/Logs/Caddie/`. Add a file handler that writes errors and warnings there. Include session ID, timestamps, pipeline step. |
-| Automatic retry with exponential backoff | When transcription fails due to transient errors (temporary memory pressure, disk I/O timeout), auto-retry with 30s, 60s, 120s backoff up to 3 attempts before marking as permanent failure. | Medium | Track retry count in meeting record (add `retryCount` column). Pipeline checks retry count before processing. Exponential delay between retries. After max retries, set status to `.error` with "Failed after 3 attempts" message. |
-| Meeting detection conflict resolution | When multiple monitors fire conflicting signals (calendar says "Team Sync" but Zoom shows "Demo"), show user what was detected and let them pick. Most recorders just pick one and ignore conflicts. | High | Requires refactoring MeetingDetector to expose multiple candidate signals. UI to show "Multiple meetings detected" with picker. Defer to later milestone if scope is too large. |
-| Notification on recording start/stop | Send macOS notification when recording auto-starts ("Recording: Team Standup on Zoom") and when transcription completes ("Transcript ready: Team Standup"). User knows the app is working without checking menu bar. | Low | Use `UNUserNotificationCenter`. Request notification permission during onboarding. Send local notifications at recording start, recording stop, transcription complete, and transcription error. |
+| Feature | Value Proposition | Complexity | Dependencies | Notes |
+|---------|-------------------|------------|--------------|-------|
+| Automatic calendar sync with incremental updates | Most competitors require manual refresh or only check on app launch. Caddie can poll every 5 min with `syncToken` to catch event edits, cancellations, and new meetings in near-real-time. | Medium | Google Calendar API sync flow | Use incremental sync: initial full sync stores `syncToken`, subsequent requests send it back. Handle `410 GONE` by clearing local cache and re-syncing. Far more efficient than re-fetching all events. |
+| Smart grace period extension for calendar events | Current grace period (15s default) may end recording too early if meeting audio drops briefly. When a calendar event is still active (endTime not passed), extend grace period automatically. | Low | Calendar event data + existing grace period logic | Check `event.endTime > now` in `MeetingDetector.graceTick()`. If true, extend grace. Simple but prevents premature recording stops during long meetings. |
+| Device validation on recording start | Verify the selected Loopback device is available before starting recording. If device disappeared (Loopback not running), fall back gracefully or notify user. | Low | Audio device picker, SystemAudioCapture | Check device exists via SimplyCoreAudio before recording. If missing, show notification: "Selected audio device unavailable. Check Loopback is running." |
+| Calendar-aware meeting titles | Use calendar event title as the meeting title instead of inferring from window titles. Much more accurate. | Low | Calendar event list | Already partially supported: `DecisionEngine` prefers `calendarEvent` over `windowTitle`. Extend to use full Google Calendar event title. |
+| Multiple Google account support | Power users have work + personal calendars on different Google accounts. Supporting multiple accounts avoids "which account has that meeting?" confusion. | Medium | OAuth2 module refactor for multi-account | Store multiple refresh tokens in Keychain, keyed by email. Aggregate events from all accounts. UI: account list in Settings with add/remove. Defer to later if scope pressure exists. |
+| Audio device hot-swap detection | If Loopback device disconnects mid-recording (Loopback crashes, USB audio device unplugged), detect and notify immediately. Already have `onDeviceDisconnected` callback on SystemAudioCapture. | Low | Existing `onDeviceDisconnected` + device alive listener | Already implemented for aggregate devices. Extend to cover user-selected device. SimplyCoreAudio fires `deviceListChanged` notification. |
 
 ## Anti-Features
 
-Features to explicitly NOT build during this hardening milestone.
+Features to explicitly NOT build for v2.0.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| AI summaries / action items | Hardening first, features later. Adding ML-powered summarization while the base pipeline has data loss bugs creates compound failure modes. The core value is reliable capture, not smart analysis. | Fix every data integrity issue first. Summaries are a future milestone. |
-| Cloud sync or backup | Core value is local-only, privacy-first. Adding sync introduces network failure modes, auth complexity, and privacy concerns that contradict the product identity. | Ensure local data integrity is bulletproof. Users can manually export. |
-| Real-time transcription | Streaming ASR during recording is architecturally different from post-recording batch transcription. It requires a completely different pipeline, different memory management, and introduces latency/accuracy tradeoffs. | Keep batch pipeline. Improve progress feedback so users know transcription is happening post-meeting. |
-| Custom recording format (MKV/fragmented MP4) | While crash-safe containers are ideal, changing the recording format is a large architectural change that touches every part of the pipeline (recording, mixdown, compression, playback). Risk of introducing new bugs exceeds benefit at this stage. | Instead: write recording state to disk for crash recovery, and add periodic WAV header updates as a smaller safety measure. |
-| Multi-language transcription UI | The ASR engine already detects language. Building language selection UI, per-language model management, and translation features is feature scope, not hardening. | Keep auto-detection. Log detected language. Surface language in transcript metadata (already done). |
-| Fancy retry UI with progress bars per attempt | Over-engineering the retry UX. A simple "Retry" button with a toast notification on success/failure is sufficient. | Keep the existing retry button in MeetingDetailView. Add a toast/notification on retry outcome. |
-| Accessibility audit / VoiceOver support | Important but orthogonal to reliability hardening. Mixing accessibility work with error handling work creates unfocused milestones. | Defer to a dedicated accessibility milestone. |
+| Google Calendar push notifications (webhooks) | Requires an HTTPS server endpoint to receive webhook callbacks. Caddie is a desktop app with no server. Push notifications are designed for web services, not local apps. | Poll with `syncToken` every 5 minutes. For a single user's calendar, this is well within rate limits and adds zero infrastructure. |
+| Full calendar CRUD (create/edit/delete events) | Scope creep. Caddie reads meetings, it doesn't manage them. Requesting `calendar.events` (read-write) scope triggers a more invasive Google OAuth consent screen. | Use `calendar.events.readonly` scope. Read-only access is all that's needed and earns more user trust. |
+| Embedded web view for OAuth | Google explicitly disallows embedded WebViews for OAuth. Using one will fail with `disallowed_useragent` error. Also a security anti-pattern (app can intercept credentials). | Use system browser via `ASWebAuthenticationSession` or spawn `NSWorkspace.shared.open(url)` to default browser. Listen on loopback for redirect. |
+| Real-time calendar event streaming | Building a persistent connection to Google Calendar for instant updates. Over-engineered for a single-user desktop app. | 5-minute polling interval with incremental sync. Meetings don't appear/change that frequently. |
+| Audio device auto-detection for Loopback | Trying to automatically detect "which device is the Loopback device" by name or manufacturer. Fragile -- users can name Loopback devices anything. | Let the user explicitly pick their device in Settings. Show all input devices, user picks the right one. Simple, reliable, no magic. |
+| Screen Recording permission bypass for device-based capture | Attempting to capture audio from a specific device without Screen Recording permission. Some CoreAudio device capture paths need it, some don't. | Always require Screen Recording permission (already granted for v1.0 process tap). The user already has this. |
+| Multi-calendar picker UI (select which calendars to monitor) | Over-engineering for v2.0. Users typically want all calendars monitored. Adding a picker adds UI complexity for minimal value. | Monitor all calendars from the authenticated account. If users complain about noise, add calendar filtering in v3.0. |
+| Speaker identification from calendar attendees | Mapping diarized speakers to calendar attendee names. Requires voice fingerprinting or manual assignment. Far too complex for v2.0. | Show attendee names as metadata. Speaker labels remain "Speaker 1", "Speaker 2" etc. |
 
 ## Feature Dependencies
 
 ```
-Fix test target linker error
+Google OAuth2 Sign-in
   |
   v
-Protocol-based DI for ML engines
+Calendar Event List (events.list + syncToken)
   |
-  +---> Pipeline error path tests
-  |
-  +---> Database migration tests
-  |
-  v
-(All error handling features can now be TDD'd)
-  |
-  +---> Replace silent try? with do-catch
-  |
-  +---> Eliminate force unwraps
-  |
-  +---> Fix weak self captures
-  |
-  +---> Critical DB write gating
+  +---> Calendar-triggered Auto-start Recording
   |       |
-  |       v
-  |     Transcript persistence as blocking step
+  |       +---> Pre-meeting Notification
   |       |
-  |       v
-  |     Safe temp file lifecycle
+  |       +---> Calendar Event Metadata in Meeting List
   |       |
-  |       v
-  |     Orphaned temp file cleanup
+  |       +---> Smart Grace Period Extension
   |
-  +---> Disk space check before recording
+  +---> Calendar-aware Meeting Titles
+
+Audio Device Picker (Settings)
+  |
+  +---> SystemAudioCapture refactor (device-based capture)
   |       |
-  |       v
-  |     Proactive disk monitoring during recording (differentiator)
+  |       +---> Device Validation on Recording Start
   |
-  +---> System audio capture status indicator
-  |
-  +---> Transcription progress in UI
-  |
-  +---> Bounded transcription queue
-  |       |
-  |       v
-  |     Idempotent pipeline processing
-  |       |
-  |       v
-  |     Automatic retry with backoff (differentiator)
-  |
-  +---> Recording session state persistence (differentiator)
-  |
-  +---> Notification on recording start/stop (differentiator)
+  +---> MicrophoneCapture refactor (specific input device)
+
+Manual Start/Stop Recording (independent, no dependencies)
 ```
 
-Key dependency insight: **Everything gates on fixing the test target.** The test linker error is the single biggest blocker. Protocol-based DI for ML engines solves both the linker issue and enables proper testing of the entire pipeline.
+Key observation: OAuth2 and Audio Device Picker are independent tracks that can be built in parallel. They converge at the RecordingCoordinator when calendar events trigger recording on a specific device.
+
+## Integration Points with Existing Code
+
+### Detection Layer (`Sources/Detection/`)
+- **CalendarMonitor.swift**: Currently uses EventKit (local macOS calendar). Needs a new `GoogleCalendarMonitor` that polls the Google Calendar API instead. Should conform to the same `DetectionMonitor` protocol but emit richer signals (event title, attendees, start/end times).
+- **MeetingDetector.swift**: `DecisionEngine.evaluate()` needs a new rule: a Google Calendar event whose time range includes "now" should be sufficient to trigger recording on its own (no need for audio process + mic signals, since the meeting is on a remote machine). Currently requires 2+ active signals with specific combinations. Calendar-only should be valid.
+- **DetectionSignal**: May need extension to carry event start/end times for grace period logic.
+
+### Recording Layer (`Sources/Recording/`)
+- **SystemAudioCapture.swift**: Currently creates a process tap (`CATapDescription(monoMixdownOfProcesses:)`) or global tap, then builds an aggregate device. For device-based capture, the approach is different: set the selected `AudioDeviceID` directly as the HAL Output AudioUnit's input device, bypassing the tap/aggregate device entirely. This is actually simpler -- no tap creation, no aggregate device. Just configure the AudioUnit to pull from the user's chosen device.
+- **MicrophoneCapture.swift**: Currently uses `AVAudioEngine().inputNode` which defaults to system default input. Must set specific device UID before calling `engine.start()`. Use `AudioUnitSetProperty(kAudioOutputUnitProperty_CurrentDevice)` on the underlying audio unit retrieved via `engine.inputNode.auAudioUnit.audioUnit`.
+- **AudioRecorder.swift**: `start(outputPath:processID:)` signature needs to accept device UIDs. When `systemDeviceUID` is provided, use device-based capture instead of process tap. When not provided, keep existing behavior for backward compatibility.
+
+### Coordinator (`Sources/Coordinator/`)
+- **RecordingCoordinator.swift**: Add `RecordingEvent.manualStart(title: String)` and extend `meetingDetected` to carry calendar event metadata. The coordinator already handles the full lifecycle; new events just create `DetectedMeeting` with different source data.
+- **RecordingState.swift**: No changes needed -- states are already generic (idle/recording/transcribing/error).
+
+### Storage (`Sources/Storage/`)
+- **Meeting model**: Add `attendees: String?`, `calendarEventId: String?` columns via GRDB migration.
+- **Auth storage**: Refresh token and account email in Keychain. SyncToken in UserDefaults (not sensitive data). No new database table needed.
+
+### UI (`Sources/UI/`)
+- **SettingsView.swift**: Add "Google Calendar" section (sign in/out, connected account email) and "Audio Devices" section (system audio device picker, microphone picker, test button).
+- **MenuBarView.swift**: Add "Start Recording" button when idle. Show next upcoming meeting from calendar with countdown.
+- **MeetingListView/MeetingDetailView**: Show attendees and calendar event source.
 
 ## MVP Recommendation
 
-Prioritize (in order):
+**Phase 1 -- Audio Device Selection (build first):**
+1. Audio device picker in Settings (system audio + microphone)
+2. SystemAudioCapture device-based capture mode
+3. MicrophoneCapture specific device support
+4. Device validation + disconnect handling
 
-1. **Fix test target** -- nothing else can be verified without this. Protocol-based DI for ML engines is the right approach because it also enables pipeline testing.
-2. **Critical DB write gating + transcript persistence** -- these prevent data loss, which is the highest-severity class of bug.
-3. **Replace silent `try?` + force unwraps + weak self** -- these are systematic, low-complexity fixes that eliminate entire categories of crashes and silent failures.
-4. **Safe temp file lifecycle + orphaned cleanup** -- prevents disk space leaks and crash-during-transcription data loss.
-5. **System audio capture status indicator + disk space check** -- highest-value user feedback features. Users must know when they only have mic audio.
-6. **Transcription progress in UI** -- reduces "is it frozen?" support burden.
+**Rationale:** This is the most mechanically complex change (CoreAudio refactoring) and is independently testable. The user can immediately benefit by selecting their Loopback device, even with manual recording.
 
-Defer:
-- **Recording session state persistence**: High complexity, and most users will not experience crashes. Do after the pipeline itself is hardened.
-- **Meeting detection conflict resolution**: High complexity, edge case. Defer to a future milestone.
-- **Automatic retry with backoff**: Medium complexity but depends on pipeline being reliable first. After pipeline hardening, most failures will be non-transient anyway.
-- **Recording health dashboard**: Nice-to-have, low urgency. Build after reliability metrics exist.
+**Phase 2 -- Manual Recording:**
+1. Manual start/stop in menu bar
+2. New RecordingEvent types in coordinator
+
+**Rationale:** Quick win that makes audio device selection immediately useful. User can manually record Jump Desktop meetings while calendar integration is built.
+
+**Phase 3 -- Google Calendar Integration:**
+1. Google OAuth2 sign-in (loopback + PKCE)
+2. Calendar event fetching with incremental sync
+3. Calendar-triggered auto-start recording
+4. Pre-meeting notifications
+5. Calendar event metadata in meeting list
+
+**Rationale:** Biggest feature, most external dependencies (Google API Console setup, OAuth consent screen configuration). Benefits from audio device selection already working.
+
+**Defer:**
+- Multiple Google account support: add after single-account is proven
+- Smart grace period extension: small enhancement, add after core calendar flow works
+- Calendar filtering: only if users report noise from all-calendar monitoring
+
+## Complexity Budget
+
+| Feature | Estimated Effort | Risk Level |
+|---------|-----------------|------------|
+| Audio device picker (UI) | 1-2 days | Low -- SimplyCoreAudio already in project |
+| SystemAudioCapture device mode | 2-3 days | Medium -- new CoreAudio capture path, needs careful testing |
+| MicrophoneCapture device mode | 1 day | Low -- well-documented AudioUnit property |
+| Manual start/stop recording | 1 day | Low -- coordinator already supports the pattern |
+| Google OAuth2 | 2-3 days | Medium -- loopback HTTP server, PKCE, Keychain storage |
+| Calendar sync + event list | 2 days | Low -- REST API, well-documented |
+| Calendar-triggered recording | 2-3 days | Medium -- timer scheduling, cancellation edge cases |
+| Pre-meeting notifications | 1 day | Low -- UNUserNotificationCenter already in use |
+| Meeting metadata migration | 0.5 days | Low -- simple GRDB migration |
+
+**Total: ~13-17 days of focused development**
 
 ## Sources
 
-- [Loom: Low Disk Space Error Handling](https://support.atlassian.com/loom/kb/seeing-a-low-on-disk-space-or-cannot-start-recording-error) -- disk space thresholds: 16GB warning (SCK), 2GB hard block (SCK), 1GB hard block (no SCK)
-- [Loom: Performance and Reliability](https://www.loom.com/blog/performance-and-reliability-2023) -- 99%+ recording success rate, 80%+ auto-recovery of failed processing
-- [Otter.ai: Troubleshooting Notetaker](https://help.otter.ai/hc/en-us/articles/14149727495831-Troubleshooting-Notetaker) -- 5-minute timeout, 4 retry attempts, 12-minute silence detection
-- [Fireflies.ai: Troubleshooting](https://guide.fireflies.ai/articles/5736968288-troubleshooting-transcription-issues) -- processing delays for long meetings, network checks
-- [OBS: Auto-Remux Feature](https://github.com/obsproject/obs-studio/issues/6903) -- MKV recording + auto-remux pattern for crash safety
-- [SQLite: How to Corrupt a Database](https://sqlite.org/howtocorrupt.html) -- WAL file management, corruption prevention
-- [GRDB: Write Failures in Sandboxed Apps](https://github.com/groue/GRDB.swift/issues/450) -- journal file creation failures in macOS sandboxed apps
-- [AssemblyAI: Retry Best Practices](https://www.assemblyai.com/blog/customer-issues-retrying-requests) -- exponential backoff for transcription APIs
-- [Screencastify: Low Disk Space](https://learn.screencastify.com/hc/en-us/articles/360049990913-I-received-a-Low-Disk-Space-notification) -- auto-pause recording on low disk
-- [Apple: UNUserNotificationCenter](https://developer.apple.com/documentation/usernotifications/unusernotificationcenter) -- macOS notification API (replaces deprecated NSUserNotification)
+- [Google OAuth2 for Desktop Apps](https://developers.google.com/identity/protocols/oauth2/native-app) -- loopback redirect, PKCE flow, token exchange
+- [Google Calendar API Scopes](https://developers.google.com/workspace/calendar/api/auth) -- `calendar.events.readonly` recommended
+- [Google Calendar API Sync](https://developers.google.com/workspace/calendar/api/guides/sync) -- incremental sync with `syncToken`, 410 GONE handling
+- [Google Calendar API Quotas](https://developers.google.com/workspace/calendar/api/guides/quota) -- per-minute rate limits, exponential backoff
+- [Google Loopback IP Migration](https://developers.google.com/identity/protocols/oauth2/resources/loopback-migration) -- custom URI deprecated, loopback IP required
+- [SimplyCoreAudio](https://github.com/rnine/SimplyCoreAudio) -- device enumeration, change notifications (already a dependency)
+- [Apple: Scheduling Local Notifications](https://developer.apple.com/documentation/usernotifications/scheduling-a-notification-locally-from-your-app) -- `UNUserNotificationCenter` for pre-meeting alerts
+- [Rogue Amoeba Loopback](https://rogueamoeba.com/loopback/) -- virtual device behavior, CoreAudio integration
+- [MacWhisper Meeting Recording](https://macwhisper.helpscoutdocs.com/article/30-record-meetings) -- competitor UX: notification-based, manual confirm
+- [Krisp Meeting Recorder](https://krisp.ai/meeting-recording/) -- competitor UX: calendar-integrated, auto-record toggle

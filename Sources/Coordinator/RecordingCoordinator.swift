@@ -17,6 +17,7 @@ actor RecordingCoordinator {
     private let recorder: AudioRecorder
     private let pipeline: TranscriptionPipeline
     private let detector: MeetingDetector
+    private let audioDeviceManager: AudioDeviceManager?
 
     // MARK: - Callbacks
 
@@ -32,12 +33,14 @@ actor RecordingCoordinator {
         database: AppDatabase,
         recorder: AudioRecorder,
         pipeline: TranscriptionPipeline,
-        detector: MeetingDetector
+        detector: MeetingDetector,
+        audioDeviceManager: AudioDeviceManager? = nil
     ) {
         self.database = database
         self.recorder = recorder
         self.pipeline = pipeline
         self.detector = detector
+        self.audioDeviceManager = audioDeviceManager
     }
 
     // MARK: - Public API
@@ -192,7 +195,21 @@ actor RecordingCoordinator {
 
         let wavPath = AudioFileManager.wavPath(for: meetingId)
         do {
-            try recorder.start(outputPath: wavPath, processID: meeting.processId)
+            // Read device selection from AudioDeviceManager (MainActor property)
+            let selectedDeviceUID: String? = await MainActor.run { audioDeviceManager?.selectedDeviceUID }
+
+            // When a custom device is selected, use device-based capture (no process tap).
+            // When auto-detected meeting has a processId, keep process tap for system audio (more accurate).
+            // When no device selected, both UIDs are nil -> v1.0 behavior.
+            let systemDeviceUID: String? = (selectedDeviceUID != nil && meeting.processId == nil) ? selectedDeviceUID : nil
+            let micDeviceUID: String? = selectedDeviceUID
+
+            try recorder.start(
+                outputPath: wavPath,
+                processID: meeting.processId,
+                systemDeviceUID: systemDeviceUID,
+                micDeviceUID: micDeviceUID
+            )
             recorder.onDeviceDisconnected = { [self] in
                 Task { await self.handle(.deviceDisconnected) }
             }
