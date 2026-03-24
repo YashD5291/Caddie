@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A native macOS menu bar app that automatically detects meetings, records system audio and microphone, transcribes with on-device ML (speaker diarization included), and stores everything locally in a searchable database. Zero cloud dependency — nothing leaves the device.
+A native macOS menu bar app that automatically detects meetings, records system audio and microphone, transcribes with on-device ML (speaker diarization included), and stores everything locally in a searchable database. Zero cloud dependency — nothing leaves the device. ML models ship bundled in the app.
 
 ## Core Value
 
@@ -20,77 +20,79 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 - ✓ Local SQLite storage with GRDB and FTS5 full-text search — existing
 - ✓ ALAC audio compression — existing
 - ✓ SwiftUI menu bar app with meeting list, detail, audio player, export — existing
-- ✓ Onboarding flow with ML model loading — Validated in Phase 10: bundle-ml-models
-- ✓ ML models bundled in app (no runtime download) — Validated in Phase 10: bundle-ml-models
 - ✓ Settings view with launch-at-login and data management — existing
+- ✓ Test infrastructure with 49+ tests executing — v1.0 Phase 1-2
+- ✓ Lock-free audio thread safety (SPSC ring buffer) — v1.0 Phase 3
+- ✓ RecordingCoordinator actor state machine — v1.0 Phase 4
+- ✓ Pipeline data integrity (file lifecycle, orphan cleanup, queue bounds) — v1.0 Phase 5
+- ✓ Full error discipline (zero try?, zero force unwraps, weak self guarded) — v1.0 Phase 6
+- ✓ Precondition guards (disk space, model timeout) — v1.0 Phase 7
+- ✓ User feedback (menu bar status, transcription progress, notifications) — v1.0 Phase 8
+- ✓ Recording resilience (device disconnect, stale cleanup) — v1.0 Phase 9
+- ✓ ML models bundled in app (no runtime download) — v1.0 Phase 10
+- ✓ Onboarding flow with bundle-based model loading — v1.0 Phase 10
 
 ### Active
 
-- [ ] Fix broken test infrastructure (yyjson linker error blocks all tests)
-- [ ] Eliminate crash risks (force unwraps on directory access, array indexing)
-- [ ] Replace silent error suppression (14 `try?` instances with no logging)
-- [ ] Fix initialization race condition (pipeline nil when meeting ends during init)
-- [ ] Make transcript persistence critical (DB write failure currently loses transcript)
-- [ ] Fix temp file cleanup timing (defer deletes mono file while diarization may be in-flight)
-- [ ] Add disk space checks before recording
-- ✓ Model download timeout removed — models bundled in app (Phase 10)
-- [ ] Bound transcription queue depth
-- [ ] Clean orphaned temp files on app startup
-- [ ] Surface system audio capture failures to user (currently silent mic-only fallback)
-- [ ] Add meeting detection conflict resolution
-- [ ] Fix weak self captures in signal handlers
-- [ ] Add test coverage for CoreAudio setup/teardown, database migrations, pipeline error paths
-- [ ] Make database write failures in pipeline block processing (not silently continue)
+- [ ] Calendar notification prompts before meetings
+- [ ] AI summaries / action items
+- [ ] Recording session crash recovery
+- [ ] Automatic transcription retry with backoff
+- [ ] Proactive disk space monitoring during recording
+- [ ] Structured error logging to file for bug reports
+- [ ] Recording health dashboard in Settings
 
 ### Out of Scope
 
 - Cloud sync — core value is local-only, privacy-first
-- AI summaries / action items — hardening first, features later
-- Calendar notification prompts — future milestone
 - Multi-platform — macOS only
+- Real-time transcription — architecturally different pipeline
+- Multi-language transcription UI — feature scope, not hardening
 
 ## Context
 
-- Brownfield project: core features shipped across ~17 commits, ML pipeline (Phase 1) most recent
-- App compiles and builds successfully
-- Test target is broken — yyjson (C dep of FluidAudio) fails to link with code coverage enabled
-- 10 test files exist but none can execute
-- Codebase concern audit identified 15+ issues ranging from crash risks to silent data loss
-- The app works on the happy path but has no resilience to edge cases or failures
-- Stack: Swift 5.9, SwiftUI, macOS 14.2+, GRDB 7.10, FluidAudio 0.12.4, XcodeGen
+- v1.0 shipped: 10 phases, 22 plans, 8,292 LOC Swift across Sources + Tests
+- 49+ tests passing (unit + integration), Swift 6.0 strict concurrency
+- Stack: Swift 6.0, SwiftUI, macOS 14.2+, GRDB 7.10, FluidAudio 0.12.4, XcodeGen
+- App bundle includes ~711MB of ML models (ASR + Sortformer)
+- CI/CD: GitHub Actions with model caching, Sparkle for updates
 
 ## Constraints
 
 - **Platform**: macOS 14.2+ (Sonoma), Apple Silicon recommended — CoreML/ANE acceleration
-- **Privacy**: All processing on-device, no network calls except Sparkle updates (models bundled since Phase 10)
-- **Dependencies**: FluidAudio is the ML backbone — its C dependency (yyjson) causes the test linker issue
+- **Privacy**: All processing on-device, no network calls except Sparkle updates
+- **Dependencies**: FluidAudio is the ML backbone — yyjson linker issue resolved via selective coverage
 - **Permissions**: Requires Microphone, Screen Recording, Accessibility, Calendar — all via system prompts
-- **Build system**: XcodeGen → Xcode project, SPM for dependencies
+- **Build system**: XcodeGen → Xcode project, SPM for dependencies, preBuildScript for model download
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Fix tests before anything else | Can't verify fixes without a working test target | — Pending |
-| Treat all error suppression as bugs | Silent failures violate core value of reliable capture | — Pending |
-| No new features until hardened | Existing features must be trustworthy before adding more | — Pending |
+| Fix tests before anything else | Can't verify fixes without a working test target | ✓ Good — 49+ tests now gate every change |
+| Treat all error suppression as bugs | Silent failures violate core value of reliable capture | ✓ Good — zero try? remaining |
+| No new features until hardened | Existing features must be trustworthy before adding more | ✓ Good — v1.0 complete, ready for features |
+| Swift 6.0 with strict concurrency | Full data race checking from day one | ✓ Good — caught 7 concurrency bugs |
+| Lock-free SPSC ring buffer | Eliminate priority inversion on real-time audio thread | ✓ Good — no locks on render callback |
+| RecordingCoordinator actor | Single owner of recording lifecycle, eliminates scattered state | ✓ Good — clean state machine with tests |
+| Bundle ML models in app | Zero network dependency after install | ✓ Good — instant onboarding, offline-first |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
-**After each phase transition** (via `/gsd:transition`):
+**After each phase transition:**
 1. Requirements invalidated? → Move to Out of Scope with reason
 2. Requirements validated? → Move to Validated with phase reference
 3. New requirements emerged? → Add to Active
 4. Decisions to log? → Add to Key Decisions
 5. "What This Is" still accurate? → Update if drifted
 
-**After each milestone** (via `/gsd:complete-milestone`):
+**After each milestone:**
 1. Full review of all sections
 2. Core Value check — still the right priority?
 3. Audit Out of Scope — reasons still valid?
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-23 after Phase 10 completion — ML models bundled in app, all 10 phases complete*
+*Last updated: 2026-03-24 after v1.0 milestone completion*
