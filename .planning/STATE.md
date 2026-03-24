@@ -1,30 +1,32 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: v1.0 milestone complete
-stopped_at: Quick task 260324-3x0 complete
-last_updated: "2026-03-24T07:14:41.481Z"
+milestone: v2.0
+milestone_name: Google Calendar + Remote Meeting Recording
+status: Defining requirements
+stopped_at: Milestone v2.0 started
+last_updated: "2026-03-24T12:45:00.000Z"
 progress:
-  total_phases: 10
-  completed_phases: 9
-  total_plans: 22
-  completed_plans: 19
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-22)
+See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 10 — bundle-ml-models-in-app-instead-of-runtime-download
+**Current focus:** v2.0 — Google Calendar + Remote Meeting Recording
 
 ## Current Position
 
-Phase: 10
-Plan: Not started
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-24 — Milestone v2.0 started
 
 ## Performance Metrics
 
