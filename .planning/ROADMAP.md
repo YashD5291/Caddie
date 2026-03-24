@@ -72,7 +72,9 @@ Plans:
   2. User clicks "Stop Recording" in the menu bar and recording stops
   3. Manual recordings appear in the meeting list and go through the full transcription pipeline (ASR + diarization + DB storage)
   4. Menu bar clearly shows recording state with source label ("Manual Recording")
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 13-01-PLAN.md -- Manual recording state machine + menu bar Start/Stop UI
 **UI hint**: yes
 
 ### Phase 14: Google Authentication
@@ -141,7 +143,7 @@ Phases 11-13 (audio device track) and Phase 14 (auth) can run in parallel. Phase
 | 10. Bundle ML Models | v1.0 | 3/3 | Complete | 2026-03-23 |
 | 11. Audio Device Selection | v2.0 | 0/1 | Complete    | 2026-03-24 |
 | 12. Audio Capture Engine | v2.0 | 1/2 | Complete    | 2026-03-24 |
-| 13. Manual Recording | v2.0 | 0/TBD | Not started | - |
+| 13. Manual Recording | v2.0 | 0/1 | Not started | - |
 | 14. Google Authentication | v2.0 | 0/TBD | Not started | - |
 | 15. Google Calendar Sync | v2.0 | 0/TBD | Not started | - |
 | 16. Calendar-Triggered Recording | v2.0 | 0/TBD | Not started | - |
