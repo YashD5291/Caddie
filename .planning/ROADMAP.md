@@ -44,7 +44,9 @@
   2. User selects a device from the picker and it becomes the active selection
   3. User quits and relaunches the app, and their previously selected device is still selected
   4. If a previously selected device is no longer connected, user sees a fallback to the default device
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 11-01-PLAN.md -- AudioDeviceManager + SettingsView picker + AppState wiring
 **UI hint**: yes
 
 ### Phase 12: Audio Capture Engine
@@ -134,7 +136,7 @@ Phases 11-13 (audio device track) and Phase 14 (auth) can run in parallel. Phase
 | 8. User Feedback | v1.0 | 2/2 | Complete | 2026-03-22 |
 | 9. Recording Resilience | v1.0 | 2/2 | Complete | 2026-03-22 |
 | 10. Bundle ML Models | v1.0 | 3/3 | Complete | 2026-03-23 |
-| 11. Audio Device Selection | v2.0 | 0/TBD | Not started | - |
+| 11. Audio Device Selection | v2.0 | 0/1 | Planning | - |
 | 12. Audio Capture Engine | v2.0 | 0/TBD | Not started | - |
 | 13. Manual Recording | v2.0 | 0/TBD | Not started | - |
 | 14. Google Authentication | v2.0 | 0/TBD | Not started | - |
