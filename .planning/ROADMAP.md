@@ -60,7 +60,7 @@ Plans:
   4. Recording produces valid stereo WAV files regardless of which capture path is used
 **Plans**: 2 plans
 Plans:
-- [ ] 12-01-PLAN.md -- MicrophoneCapture HAL AudioUnit path (TDD)
+- [x] 12-01-PLAN.md -- MicrophoneCapture HAL AudioUnit path (TDD)
 - [ ] 12-02-PLAN.md -- SystemAudioCapture device path + AudioRecorder routing + RecordingCoordinator wiring
 
 ### Phase 13: Manual Recording
@@ -140,7 +140,7 @@ Phases 11-13 (audio device track) and Phase 14 (auth) can run in parallel. Phase
 | 9. Recording Resilience | v1.0 | 2/2 | Complete | 2026-03-22 |
 | 10. Bundle ML Models | v1.0 | 3/3 | Complete | 2026-03-23 |
 | 11. Audio Device Selection | v2.0 | 0/1 | Complete    | 2026-03-24 |
-| 12. Audio Capture Engine | v2.0 | 0/2 | Planned    |  |
+| 12. Audio Capture Engine | v2.0 | 1/2 | In Progress|  |
 | 13. Manual Recording | v2.0 | 0/TBD | Not started | - |
 | 14. Google Authentication | v2.0 | 0/TBD | Not started | - |
 | 15. Google Calendar Sync | v2.0 | 0/TBD | Not started | - |
