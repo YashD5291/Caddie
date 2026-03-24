@@ -48,10 +48,18 @@ final class AudioRecorder {
     /// - Parameters:
     ///   - outputPath: URL for the output WAV file.
     ///   - processID: If provided, capture system audio from this process only.
-    func start(outputPath: URL, processID: pid_t?) throws {
+    ///   - systemDeviceUID: If provided, capture system audio from this specific device (no process tap).
+    ///   - micDeviceUID: If provided, capture microphone from this specific device via HAL AudioUnit.
+    /// - Throws: `RecorderError.conflictingAudioSources` if both processID and systemDeviceUID are set.
+    func start(outputPath: URL, processID: pid_t?, systemDeviceUID: String? = nil, micDeviceUID: String? = nil) throws {
         guard !isRecording else {
             logger.warning("AudioRecorder already recording")
             return
+        }
+
+        // Validate: cannot specify both process tap and direct device for system audio
+        if processID != nil && systemDeviceUID != nil {
+            throw RecorderError.conflictingAudioSources
         }
 
         // Create the stereo WAV file
@@ -76,11 +84,18 @@ final class AudioRecorder {
         timer.resume()
         flushTimer = timer
 
-        // Start system audio capture
+        // Start system audio capture -- route to correct path based on parameters
         do {
-            try systemCapture.start(processID: processID) { [weak self] (buffer, count) in
-                guard let self else { return }  // Real-time thread -- no logging
-                self.handleSystemAudioBuffer(buffer, count: count)
+            if let systemUID = systemDeviceUID {
+                try systemCapture.start(deviceUID: systemUID) { [weak self] (buffer, count) in
+                    guard let self else { return }  // Real-time thread -- no logging
+                    self.handleSystemAudioBuffer(buffer, count: count)
+                }
+            } else {
+                try systemCapture.start(processID: processID) { [weak self] (buffer, count) in
+                    guard let self else { return }  // Real-time thread -- no logging
+                    self.handleSystemAudioBuffer(buffer, count: count)
+                }
             }
             recordingMode = .systemAndMic
             systemCapture.onDisconnect = { [weak self] in
@@ -98,10 +113,17 @@ final class AudioRecorder {
             // Continue without system audio -- microphone-only recording is still useful
         }
 
-        // Start microphone capture
-        try micCapture.start { [weak self] (buffer, count) in
-            guard let self else { return }  // Real-time thread -- no logging
-            self.handleMicBuffer(buffer, count: count)
+        // Start microphone capture -- route to correct path based on parameters
+        if let micUID = micDeviceUID {
+            try micCapture.start(deviceUID: micUID) { [weak self] (buffer, count) in
+                guard let self else { return }  // Real-time thread -- no logging
+                self.handleMicBuffer(buffer, count: count)
+            }
+        } else {
+            try micCapture.start { [weak self] (buffer, count) in
+                guard let self else { return }  // Real-time thread -- no logging
+                self.handleMicBuffer(buffer, count: count)
+            }
         }
 
         logger.info("AudioRecorder started: \(outputPath.lastPathComponent)")
@@ -281,10 +303,12 @@ final class AudioRecorder {
 
     enum RecorderError: Error, LocalizedError {
         case failedToCreateFile(OSStatus)
+        case conflictingAudioSources
 
         var errorDescription: String? {
             switch self {
             case .failedToCreateFile(let s): return "Failed to create WAV file (OSStatus \(s))"
+            case .conflictingAudioSources: return "Cannot specify both processID and systemDeviceUID"
             }
         }
     }
