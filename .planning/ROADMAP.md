@@ -87,7 +87,11 @@ Plans:
   3. Multiple simultaneous API calls that discover an expired token result in exactly one refresh request (no race conditions, no invalid_grant errors)
   4. User can sign out from Settings, which clears Keychain tokens and revokes the Google token
   5. User can re-authenticate after signing out
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 14-01-PLAN.md -- KeychainHelper TDD + GoogleAuthError + GoogleOAuthConfig foundation types
+- [ ] 14-02-PLAN.md -- GoogleAuthManager actor TDD with PKCE, serialized token refresh, sign-out
+- [ ] 14-03-PLAN.md -- GoogleAccountSection UI + AppState wiring + Info.plist URL scheme + human verification
 **UI hint**: yes
 
 ### Phase 15: Google Calendar Sync
@@ -144,7 +148,7 @@ Phases 11-13 (audio device track) and Phase 14 (auth) can run in parallel. Phase
 | 11. Audio Device Selection | v2.0 | 0/1 | Complete    | 2026-03-24 |
 | 12. Audio Capture Engine | v2.0 | 1/2 | Complete    | 2026-03-24 |
 | 13. Manual Recording | v2.0 | 0/1 | Complete    | 2026-03-24 |
-| 14. Google Authentication | v2.0 | 0/TBD | Not started | - |
+| 14. Google Authentication | v2.0 | 0/3 | Not started | - |
 | 15. Google Calendar Sync | v2.0 | 0/TBD | Not started | - |
 | 16. Calendar-Triggered Recording | v2.0 | 0/TBD | Not started | - |
 | 17. Calendar UI + Onboarding | v2.0 | 0/TBD | Not started | - |
