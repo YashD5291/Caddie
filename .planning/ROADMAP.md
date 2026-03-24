@@ -58,7 +58,10 @@ Plans:
   2. When a specific microphone device is selected, MicrophoneCapture uses HAL AudioUnit instead of AVAudioEngine
   3. When no custom device is selected, existing v1.0 capture behavior (process tap + default mic) is unchanged
   4. Recording produces valid stereo WAV files regardless of which capture path is used
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 12-01-PLAN.md -- MicrophoneCapture HAL AudioUnit path (TDD)
+- [ ] 12-02-PLAN.md -- SystemAudioCapture device path + AudioRecorder routing + RecordingCoordinator wiring
 
 ### Phase 13: Manual Recording
 **Goal**: Users can record any meeting on demand without waiting for auto-detection
@@ -137,7 +140,7 @@ Phases 11-13 (audio device track) and Phase 14 (auth) can run in parallel. Phase
 | 9. Recording Resilience | v1.0 | 2/2 | Complete | 2026-03-22 |
 | 10. Bundle ML Models | v1.0 | 3/3 | Complete | 2026-03-23 |
 | 11. Audio Device Selection | v2.0 | 0/1 | Complete    | 2026-03-24 |
-| 12. Audio Capture Engine | v2.0 | 0/TBD | Not started | - |
+| 12. Audio Capture Engine | v2.0 | 0/2 | Not started | - |
 | 13. Manual Recording | v2.0 | 0/TBD | Not started | - |
 | 14. Google Authentication | v2.0 | 0/TBD | Not started | - |
 | 15. Google Calendar Sync | v2.0 | 0/TBD | Not started | - |
