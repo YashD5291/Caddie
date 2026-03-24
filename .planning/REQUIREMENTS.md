@@ -15,9 +15,9 @@ Requirements for Google Calendar integration and remote meeting recording suppor
 
 ### Manual Recording
 
-- [ ] **REC-01**: User can manually start recording from the menu bar with one click
-- [ ] **REC-02**: User can manually stop recording from the menu bar
-- [ ] **REC-03**: Manual recordings go through the same transcription pipeline as auto-detected ones
+- [x] **REC-01**: User can manually start recording from the menu bar with one click
+- [x] **REC-02**: User can manually stop recording from the menu bar
+- [x] **REC-03**: Manual recordings go through the same transcription pipeline as auto-detected ones
 
 ### Google Authentication
 
@@ -78,9 +78,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AUD-01 | Phase 11: Audio Device Selection | Complete |
 | AUD-02 | Phase 11: Audio Device Selection | Complete |
 | AUD-03 | Phase 12: Audio Capture Engine | Complete |
-| REC-01 | Phase 13: Manual Recording | Pending |
-| REC-02 | Phase 13: Manual Recording | Pending |
-| REC-03 | Phase 13: Manual Recording | Pending |
+| REC-01 | Phase 13: Manual Recording | Complete |
+| REC-02 | Phase 13: Manual Recording | Complete |
+| REC-03 | Phase 13: Manual Recording | Complete |
 | AUTH-01 | Phase 14: Google Authentication | Pending |
 | AUTH-02 | Phase 14: Google Authentication | Pending |
 | AUTH-03 | Phase 14: Google Authentication | Pending |

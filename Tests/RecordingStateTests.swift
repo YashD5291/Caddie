@@ -283,6 +283,63 @@ final class RecordingStateTests: XCTestCase {
         XCTAssertNil(result)
     }
 
+    // MARK: - Manual Recording Transitions
+
+    func testManualStartFromIdleTransitionsToRecording() {
+        let result = RecordingState.reduce(state: .idle, event: .manualStart(title: "Manual Recording"))
+
+        XCTAssertNotNil(result)
+        let (newState, sideEffect) = result!
+        guard case .recording(let meetingId) = newState else {
+            XCTFail("Expected .recording state, got \(newState)")
+            return
+        }
+        XCTAssertFalse(meetingId.isEmpty)
+
+        guard case .startRecording(let effectId, let effectMeeting) = sideEffect else {
+            XCTFail("Expected .startRecording side effect, got \(String(describing: sideEffect))")
+            return
+        }
+        XCTAssertEqual(effectId, meetingId)
+        XCTAssertEqual(effectMeeting.app, "Manual")
+        XCTAssertEqual(effectMeeting.title, "Manual Recording")
+        XCTAssertNil(effectMeeting.processId)
+    }
+
+    func testManualStopFromRecordingTransitionsToTranscribing() {
+        let result = RecordingState.reduce(
+            state: .recording(meetingId: "abc123"),
+            event: .manualStop
+        )
+
+        XCTAssertNotNil(result)
+        let (newState, sideEffect) = result!
+        guard case .transcribing(let meetingId) = newState else {
+            XCTFail("Expected .transcribing state, got \(newState)")
+            return
+        }
+        XCTAssertEqual(meetingId, "abc123")
+
+        guard case .stopAndTranscribe(let effectId) = sideEffect else {
+            XCTFail("Expected .stopAndTranscribe side effect")
+            return
+        }
+        XCTAssertEqual(effectId, "abc123")
+    }
+
+    func testManualStartWhileRecordingReturnsNil() {
+        let result = RecordingState.reduce(
+            state: .recording(meetingId: "abc123"),
+            event: .manualStart(title: "X")
+        )
+        XCTAssertNil(result)
+    }
+
+    func testManualStopFromIdleReturnsNil() {
+        let result = RecordingState.reduce(state: .idle, event: .manualStop)
+        XCTAssertNil(result)
+    }
+
     // MARK: - Equatable
 
     func testIdleEquality() {
