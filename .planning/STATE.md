@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Google Calendar + Remote Meeting Recording
-status: Ready to plan
-stopped_at: Completed 11-01-PLAN.md
-last_updated: "2026-03-24T10:25:27.037Z"
+status: Ready to execute
+stopped_at: Completed 12-01-PLAN.md
+last_updated: "2026-03-24T11:22:06.439Z"
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 1
+  total_plans: 3
   completed_plans: 1
 ---
 
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 11 — audio-device-selection
+**Current focus:** Phase 12 — audio-capture-engine
 
 ## Current Position
 
-Phase: 12
-Plan: Not started
+Phase: 12 (audio-capture-engine) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Plan: Not started
 - Trend: Stable (~5 min avg)
 
 | Phase 11 P01 | 29min | 2 tasks | 5 files |
+| Phase 12 P01 | 23min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,8 @@ Recent decisions affecting current work:
 - [Phase 11]: Store device UID (persistent string) not AudioDeviceID (transient int) in UserDefaults
 - [Phase 11]: nonisolated(unsafe) for observer property to enable deinit cleanup in Swift 6
 - [Phase 11]: Filter only Caddie aggregate devices by UID prefix, keep user aggregate devices
+- [Phase 12]: Raw CoreAudio kAudioHardwarePropertyDeviceForUID for UID resolution instead of SimplyCoreAudio (objectID is internal)
+- [Phase 12]: Dual start paths via method overload (not boolean flag) -- cleaner API, zero v1.0 regression risk
 
 ### Pending Todos
 
@@ -84,6 +87,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T10:19:41.863Z
-Stopped at: Completed 11-01-PLAN.md
+Last session: 2026-03-24T11:22:06.436Z
+Stopped at: Completed 12-01-PLAN.md
 Resume file: None

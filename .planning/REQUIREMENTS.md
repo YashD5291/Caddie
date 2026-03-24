@@ -9,9 +9,9 @@ Requirements for Google Calendar integration and remote meeting recording suppor
 
 ### Audio Device Selection
 
-- [ ] **AUD-01**: User can select which audio input device to capture from in Settings (Loopback, built-in mic, etc.)
-- [ ] **AUD-02**: Selected audio device persists across app restarts (stored in UserDefaults)
-- [ ] **AUD-03**: MicrophoneCapture supports non-default input devices via HAL AudioUnit (replaces AVAudioEngine path when custom device selected)
+- [x] **AUD-01**: User can select which audio input device to capture from in Settings (Loopback, built-in mic, etc.)
+- [x] **AUD-02**: Selected audio device persists across app restarts (stored in UserDefaults)
+- [x] **AUD-03**: MicrophoneCapture supports non-default input devices via HAL AudioUnit (replaces AVAudioEngine path when custom device selected)
 
 ### Manual Recording
 
@@ -75,9 +75,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| AUD-01 | Phase 11: Audio Device Selection | Pending |
-| AUD-02 | Phase 11: Audio Device Selection | Pending |
-| AUD-03 | Phase 12: Audio Capture Engine | Pending |
+| AUD-01 | Phase 11: Audio Device Selection | Complete |
+| AUD-02 | Phase 11: Audio Device Selection | Complete |
+| AUD-03 | Phase 12: Audio Capture Engine | Complete |
 | REC-01 | Phase 13: Manual Recording | Pending |
 | REC-02 | Phase 13: Manual Recording | Pending |
 | REC-03 | Phase 13: Manual Recording | Pending |

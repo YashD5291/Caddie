@@ -39,14 +39,14 @@ final class DiarizationEngine: DiarizationEngineProtocol, @unchecked Sendable {
 
             let timeline = try diarizer.processComplete(audioSamples)
 
-            // timeline.speakers is [Int: DiarizerSpeaker] keyed by speaker slot index
+            // timeline.speakers is [Int: DiarizerSpeaker] keyed by speaker index
             var rawSegments: [(speakerIndex: Int, startTime: Float, endTime: Float)] = []
             for (speakerIndex, speaker) in timeline.speakers {
                 for segment in speaker.finalizedSegments {
                     rawSegments.append((
                         speakerIndex: speakerIndex,
-                        startTime: Float(segment.startTime),
-                        endTime: Float(segment.endTime)
+                        startTime: segment.startTime,
+                        endTime: segment.endTime
                     ))
                 }
             }
