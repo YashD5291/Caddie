@@ -75,3 +75,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
+| AUD-01 | Phase 11: Audio Device Selection | Pending |
+| AUD-02 | Phase 11: Audio Device Selection | Pending |
+| AUD-03 | Phase 12: Audio Capture Engine | Pending |
+| REC-01 | Phase 13: Manual Recording | Pending |
+| REC-02 | Phase 13: Manual Recording | Pending |
+| REC-03 | Phase 13: Manual Recording | Pending |
+| AUTH-01 | Phase 14: Google Authentication | Pending |
+| AUTH-02 | Phase 14: Google Authentication | Pending |
+| AUTH-03 | Phase 14: Google Authentication | Pending |
+| AUTH-04 | Phase 14: Google Authentication | Pending |
+| CAL-01 | Phase 15: Google Calendar Sync | Pending |
+| CAL-05 | Phase 15: Google Calendar Sync | Pending |
+| CAL-02 | Phase 16: Calendar-Triggered Recording | Pending |
+| CAL-03 | Phase 16: Calendar-Triggered Recording | Pending |
+| CAL-04 | Phase 17: Calendar UI + Onboarding | Pending |
+| ONB-01 | Phase 17: Calendar UI + Onboarding | Pending |
+| ONB-02 | Phase 17: Calendar UI + Onboarding | Pending |
