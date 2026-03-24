@@ -25,7 +25,7 @@
 
 ### 🚧 v2.0 Google Calendar + Remote Meeting Recording
 
-- [ ] **Phase 11: Audio Device Selection** - User can see, select, and persist audio input devices in Settings
+- [x] **Phase 11: Audio Device Selection** - User can see, select, and persist audio input devices in Settings (completed 2026-03-24)
 - [ ] **Phase 12: Audio Capture Engine** - Recording engine captures from user-selected devices via HAL AudioUnit
 - [ ] **Phase 13: Manual Recording** - User can start/stop recording from menu bar on demand
 - [ ] **Phase 14: Google Authentication** - User can sign into Google with OAuth2 and manage auth state
@@ -136,7 +136,7 @@ Phases 11-13 (audio device track) and Phase 14 (auth) can run in parallel. Phase
 | 8. User Feedback | v1.0 | 2/2 | Complete | 2026-03-22 |
 | 9. Recording Resilience | v1.0 | 2/2 | Complete | 2026-03-22 |
 | 10. Bundle ML Models | v1.0 | 3/3 | Complete | 2026-03-23 |
-| 11. Audio Device Selection | v2.0 | 0/1 | Planning | - |
+| 11. Audio Device Selection | v2.0 | 0/1 | Complete    | 2026-03-24 |
 | 12. Audio Capture Engine | v2.0 | 0/TBD | Not started | - |
 | 13. Manual Recording | v2.0 | 0/TBD | Not started | - |
 | 14. Google Authentication | v2.0 | 0/TBD | Not started | - |

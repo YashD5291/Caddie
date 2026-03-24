@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Google Calendar + Remote Meeting Recording
-status: Ready to plan Phase 11
-stopped_at: Roadmap created for v2.0
-last_updated: "2026-03-24T13:00:00.000Z"
+status: Ready to plan
+stopped_at: Completed 11-01-PLAN.md
+last_updated: "2026-03-24T10:25:27.037Z"
 progress:
   total_phases: 7
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
 ---
 
 # Project State
@@ -19,20 +19,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** v2.0 Phase 11 -- Audio Device Selection
+**Current focus:** Phase 11 — audio-device-selection
 
 ## Current Position
 
-Phase: 11 of 17 (Audio Device Selection)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-03-24 -- Roadmap created for v2.0 milestone (7 phases, 17 requirements)
-
-Progress: [██████████░░░░░░░░░░] 59% (10/17 phases complete across all milestones)
+Phase: 12
+Plan: Not started
 
 ## Performance Metrics
 
 **Velocity (v1.0):**
+
 - Total plans completed: 19
 - Average duration: ~9 min
 - Total execution time: ~2.8 hours
@@ -52,8 +49,11 @@ Progress: [██████████░░░░░░░░░░] 59% (10
 | Phase 10 | 3 | 14min | ~5min |
 
 **Recent Trend:**
+
 - Last 5 plans: 9m, 4m, 3m, 7m, 5m
 - Trend: Stable (~5 min avg)
+
+| Phase 11 P01 | 29min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -68,6 +68,9 @@ Recent decisions affecting current work:
 - [v2.0 Research]: Token refresh serialization through GoogleAuthManager actor from day one
 - [v2.0 Research]: In-memory calendar event cache (no SQLite table) -- events are ephemeral scheduling data
 - [v2.0 Research]: Google Calendar alone triggers recording (no local signals needed for remote meetings)
+- [Phase 11]: Store device UID (persistent string) not AudioDeviceID (transient int) in UserDefaults
+- [Phase 11]: nonisolated(unsafe) for observer property to enable deinit cleanup in Swift 6
+- [Phase 11]: Filter only Caddie aggregate devices by UID prefix, keep user aggregate devices
 
 ### Pending Todos
 
@@ -81,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24
-Stopped at: v2.0 roadmap created, ready to plan Phase 11
+Last session: 2026-03-24T10:19:41.863Z
+Stopped at: Completed 11-01-PLAN.md
 Resume file: None
