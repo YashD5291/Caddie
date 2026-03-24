@@ -4,6 +4,7 @@ import ServiceManagement
 private let settingsLogger = CaddieLogger.app
 
 struct SettingsView: View {
+    @Environment(AppState.self) private var appState
     @State private var launchAtLogin = false
     @State private var gracePeriod: Double = 10
     @State private var micStatus: PermissionStatus = .undetermined
@@ -14,6 +15,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             generalSection
+            audioInputSection
             permissionsSection
             storageSection
             aboutSection
@@ -55,6 +57,38 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    // MARK: - Audio Input
+
+    private var audioInputSection: some View {
+        @Bindable var audioDeviceManager = appState.audioDeviceManager
+        return Section("Audio Input") {
+            Picker("Input Device", selection: $audioDeviceManager.selectedDeviceUID) {
+                Text("System Default").tag(String?.none)
+                ForEach(audioDeviceManager.availableInputDevices) { device in
+                    HStack {
+                        Text(device.name)
+                        if !device.manufacturer.isEmpty && device.manufacturer != "Unknown" {
+                            Text("(\(device.manufacturer))")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .tag(Optional(device.id))
+                }
+            }
+
+            if audioDeviceManager.isUsingFallback {
+                Label("Previously selected device not found. Using system default.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            Text("Choose which microphone Caddie records from.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
     }
 

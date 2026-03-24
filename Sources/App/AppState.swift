@@ -39,6 +39,7 @@ final class AppState {
 
     private(set) var database: AppDatabase?
     private(set) var modelManager = ModelManager()
+    private(set) var audioDeviceManager = AudioDeviceManager()
     private(set) var coordinator: RecordingCoordinator?
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AppState")
@@ -55,6 +56,7 @@ final class AppState {
             try AudioFileManager.ensureDirectoryExists()
             AudioFileManager.cleanupOrphanedTempFiles() // DATA-05
             SystemAudioCapture.cleanupStaleAggregateDevices() // REC-06
+            audioDeviceManager.initialize() // AUD-01/AUD-02: enumerate devices and load persisted selection
 
             // 1. Load models from app bundle (D-04: bundle-based, no network)
             await modelManager.loadModelsFromBundle()
