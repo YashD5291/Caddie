@@ -40,7 +40,9 @@ final class AppState {
     private(set) var database: AppDatabase?
     private(set) var modelManager = ModelManager()
     private(set) var audioDeviceManager = AudioDeviceManager()
+    private(set) var authManager = GoogleAuthManager()
     private(set) var coordinator: RecordingCoordinator?
+    var googleAuthState: GoogleAuthManager.AuthState = .signedOut
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AppState")
 
@@ -52,6 +54,10 @@ final class AppState {
     func initialize() async {
         guard !isInitialized else { return }
         do {
+            // Restore Google auth session from Keychain (AUTH-01)
+            await authManager.restoreSession()
+            googleAuthState = await authManager.state
+
             database = try AppDatabase()
             try AudioFileManager.ensureDirectoryExists()
             AudioFileManager.cleanupOrphanedTempFiles() // DATA-05
@@ -167,6 +173,25 @@ final class AppState {
 
     func retryTranscription(meetingId: String) {
         Task { await coordinator?.retryTranscription(meetingId: meetingId) }
+    }
+
+    func signInToGoogle(window: NSWindow) {
+        Task {
+            do {
+                try await authManager.signIn(presenting: window)
+                googleAuthState = await authManager.state
+            } catch {
+                CaddieLogger.auth.error("Google sign-in failed: \(error.localizedDescription)")
+                googleAuthState = await authManager.state
+            }
+        }
+    }
+
+    func signOutFromGoogle() {
+        Task {
+            await authManager.signOut()
+            googleAuthState = await authManager.state
+        }
     }
 
     func shutdown() {

@@ -26,5 +26,16 @@
     <string>Caddie reads your calendar to detect meeting titles and improve detection accuracy.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Caddie reads browser tab titles to detect web-based meetings like Google Meet.</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>com.googleusercontent.apps.REPLACE_WITH_GOOGLE_CLIENT_ID</string>
+            </array>
+            <key>CFBundleURLName</key>
+            <string>Google OAuth Redirect</string>
+        </dict>
+    </array>
 </dict>
 </plist>
