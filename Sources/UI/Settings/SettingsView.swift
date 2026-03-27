@@ -16,6 +16,7 @@ struct SettingsView: View {
         Form {
             generalSection
             audioInputSection
+            GoogleAccountSection()
             permissionsSection
             storageSection
             aboutSection
