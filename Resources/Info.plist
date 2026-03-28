@@ -31,7 +31,7 @@
         <dict>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>com.googleusercontent.apps.REPLACE_WITH_GOOGLE_CLIENT_ID</string>
+                <string>com.googleusercontent.apps.736932798207-9j5uipki4somq90inf7ich0dvei5dvul</string>
             </array>
             <key>CFBundleURLName</key>
             <string>Google OAuth Redirect</string>

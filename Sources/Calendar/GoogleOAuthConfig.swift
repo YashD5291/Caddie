@@ -3,10 +3,10 @@ import Foundation
 enum GoogleOAuthConfig {
     /// Desktop app client ID from Google Cloud Console.
     /// Replace with actual client ID after creating OAuth credentials.
-    static let clientID = "REPLACE_WITH_GOOGLE_CLIENT_ID.apps.googleusercontent.com"
+    static let clientID = "736932798207-9j5uipki4somq90inf7ich0dvei5dvul.apps.googleusercontent.com"
 
     /// Reversed client ID as custom URI scheme for OAuth redirect.
-    static let callbackScheme = "com.googleusercontent.apps.REPLACE_WITH_GOOGLE_CLIENT_ID"
+    static let callbackScheme = "com.googleusercontent.apps.736932798207-9j5uipki4somq90inf7ich0dvei5dvul"
 
     /// Full redirect URI registered in Google Cloud Console.
     static let redirectURI = "\(callbackScheme):/oauth2redirect/google"
