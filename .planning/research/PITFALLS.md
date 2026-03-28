@@ -1,385 +1,549 @@
-# Pitfalls Research
+# Domain Pitfalls
 
-**Domain:** macOS native audio recording/ML transcription app hardening
-**Researched:** 2026-03-22
-**Confidence:** HIGH (verified against codebase + official Apple docs + community reports)
+**Domain:** Google Calendar OAuth2 integration + audio device selection for macOS meeting recorder
+**Researched:** 2026-03-24
+**Confidence:** HIGH (verified against Google official docs, Apple docs, codebase analysis, community reports)
+
+---
 
 ## Critical Pitfalls
 
-### Pitfall 1: NSLock on the Real-Time Audio Thread Causes Priority Inversion
-
-**What goes wrong:**
-`AudioRecorder.swift` uses `NSLock` to protect `systemBuffer` and `micBuffer`. The render callback in `SystemAudioCapture` runs on CoreAudio's real-time audio thread. When the render callback delivers samples to `handleSystemAudioBuffer`/`handleMicBuffer`, these methods acquire the same `NSLock`. If the main thread holds the lock (during `stop()` -> `flushBuffers(final: true)`), the real-time audio thread blocks waiting for it. CoreAudio's real-time thread has strict deadline guarantees -- blocking it causes audio glitches, buffer underruns, and in pathological cases the audio subsystem kills the tap.
-
-**Why it happens:**
-NSLock seems correct for protecting shared buffers. The subtlety is that CoreAudio render callbacks run on a real-time priority thread where blocking is forbidden. Apple's documentation states render callbacks "should return immediately without blocking on anything." NSLock does not implement priority inheritance (unlike `pthread_mutex` with `PTHREAD_PRIO_INHERIT`), so a lower-priority thread holding the lock starves the real-time thread.
-
-**How to avoid:**
-Replace `NSLock` + shared arrays with a lock-free ring buffer (single-producer, single-consumer). The render callback writes into the ring buffer without locks, and a separate drain timer on the main thread reads and flushes to disk. Apple's `TPCircularBuffer` is the canonical pattern. Alternatively, use `os_unfair_lock` which supports priority donation on Apple platforms, but even that is discouraged on real-time threads -- lock-free is the correct solution.
-
-**Warning signs:**
-- Audio glitches or dropouts during recording, especially when the UI is busy
-- Thread Sanitizer warnings about lock contention between audio and main threads
-- Xcode's Thread Performance Checker flagging priority inversion on the audio thread
-- Occasional silence gaps in recorded audio
-
-**Phase to address:**
-Phase 1 (Test Infrastructure) or Phase 2 (Error Hardening). This is a correctness bug in the recording core. Must be fixed before any other recording work.
+Mistakes that cause rewrites, data loss, or broken user experience.
 
 ---
 
-### Pitfall 2: `Unmanaged.passUnretained(self)` in Render Callback Crashes After Deallocation
+### Pitfall 1: OAuth2 Token Refresh Race Condition Causes Silent Calendar Failures
 
 **What goes wrong:**
-`SystemAudioCapture.swift:287` passes `self` to the render callback as `Unmanaged.passUnretained(self).toOpaque()`. The callback at line 396 does `Unmanaged<SystemAudioCapture>.fromOpaque(inRefCon).takeUnretainedValue()`. If `SystemAudioCapture` is deallocated while the audio unit is still running (race between `deinit` calling `stop()` and a pending render callback), the callback accesses freed memory. This is a use-after-free crash, not a Swift-level optional -- it happens below ARC's visibility.
+Google OAuth2 access tokens expire after 1 hour. When two concurrent calendar API requests discover the token is expired simultaneously, both attempt to refresh using the same refresh token. Google's token endpoint issues a new access token on the first refresh but may invalidate the refresh token (rotation). The second refresh request fails with `invalid_grant`. The app now has no valid tokens and cannot access the calendar until the user re-authenticates -- but nothing in the app detects this state. Calendar sync silently stops working. Meetings are missed because Caddie thinks it has calendar access but every API call fails.
 
 **Why it happens:**
-`passUnretained` is the common pattern for C callbacks because `passRetained` would leak. The assumption is that `stop()` in `deinit` stops the AudioUnit before `self` is deallocated. But CoreAudio's `AudioOutputUnitStop` does not guarantee that all in-flight render callbacks have completed by the time it returns -- there can be one final callback executing concurrently.
+Caddie will poll the Calendar API periodically AND the user might trigger a manual sync from the UI. If both fire near the token expiry boundary, two refresh attempts race. This is especially common when the app wakes from sleep (laptop lid open) -- the token expired hours ago, and multiple subsystems all discover this at once.
 
-**How to avoid:**
-Use `Unmanaged.passRetained(self)` in `start()` and `Unmanaged.fromOpaque(refCon).release()` in `stop()` (after `AudioOutputUnitStop`). This ensures `self` stays alive until explicitly released. Alternatively, use a separate context object that outlives the callback lifecycle:
-```swift
-private class RenderContext {
-    var onBuffer: BufferCallback?
-    var audioUnit: AudioComponentInstance?
-}
-```
-Pass the context (retained) and nil out its fields in `stop()`.
+**Consequences:**
+- Calendar sync silently stops. No meetings detected from Google Calendar.
+- User has no idea their OAuth session is broken until they miss a meeting.
+- Violates core value: "every meeting must be reliably captured."
 
-**Warning signs:**
-- EXC_BAD_ACCESS crashes with stack traces in `systemAudioRenderCallback`
-- Crashes when rapidly starting/stopping recordings
-- Crashes during app shutdown if a recording is active
+**Prevention:**
+1. **Serialize all token refresh attempts** through a single async gate (e.g., an actor property `isRefreshing: Bool` with a continuation queue). When refresh is in progress, other callers suspend and receive the new token when it arrives.
+2. **Proactively refresh tokens 5 minutes before expiry** rather than waiting for a 401 response. Store `expiresAt` alongside the access token.
+3. **On `invalid_grant`**: immediately set a `calendarAuthBroken` state in AppState, show a persistent UI warning ("Calendar disconnected -- sign in again"), and stop all Calendar API polling.
+4. **Retry once** on 401, then escalate to re-auth.
 
-**Phase to address:**
-Phase 2 (Error Hardening). This is a memory safety bug that can crash the app. Must be fixed alongside the NSLock issue since both are in the recording core.
+**Detection:**
+- Calendar API calls returning 401 repeatedly after a refresh attempt
+- `invalid_grant` error from token endpoint
+- Log messages showing two concurrent refresh attempts
+- User reports that Caddie stopped detecting calendar meetings
+
+**Phase to address:** OAuth2 implementation phase. Build the token refresh serialization from day one -- retrofitting it is painful.
+
+**Confidence:** HIGH -- race condition documented in multiple OAuth2 libraries and Google's own issue tracker.
 
 ---
 
-### Pitfall 3: Process Tap Invalidation When Meeting App Exits or is Force-Quit
+### Pitfall 2: Loopback Virtual Device Disappears During Recording When User Quits Loopback App
 
 **What goes wrong:**
-`SystemAudioCapture` creates a process tap targeting a specific `pid_t`. If the meeting app (Zoom, Teams, etc.) exits, crashes, or is force-quit during recording, the process tap becomes invalid. The aggregate device built on top of it starts delivering silence or errors. CoreAudio does not automatically notify that the tap source has disappeared -- the render callback keeps running but produces zero samples. The recording completes with partial silence, and the user has no indication their audio was lost.
+Caddie's v2.0 use case has the user selecting a Loopback virtual audio device as the capture source (routing Jump Desktop audio through Loopback). If the user quits Loopback (or Loopback's ACE audio component crashes), the virtual device disappears from CoreAudio's device list. The existing `SystemAudioCapture` uses a process tap on a specific process, but with a user-selected device, the capture path is different -- it targets a specific `AudioDeviceID`. When that device vanishes:
+
+- The aggregate device built on top of it may crash or return `kAudioObjectUnknown`
+- The render callback gets `AudioUnitRender` errors (OSStatus -10863 `kAudioUnitErr_CannotDoInCurrentContext`)
+- Caddie currently has `onDeviceDisconnected` but it only fires for the aggregate device's alive listener -- a Loopback virtual device disappearing may not trigger `kAudioDevicePropertyDeviceIsAlive` because the device was never "alive" in the hardware sense
 
 **Why it happens:**
-CoreAudio process taps are tied to a running process. When that process terminates, the tap's audio source disappears. There is no built-in notification mechanism for tap invalidation in the `CATapDescription` API. The aggregate device remains valid (it is a device-level construct), but its sub-device (the tap) is gone.
+Loopback virtual devices are software-created AudioObjects. They exist only while the Loopback kernel extension / user-space daemon is running. Unlike hardware devices that have USB disconnect events, virtual device removal is handled differently by CoreAudio. On macOS 14.5+, Loopback uses a new capture mechanism that does not require a system extension, making it even more transient.
 
-**How to avoid:**
-1. Monitor the target process with `NSWorkspace.shared.runningApplications` or `DispatchSource.makeProcessSource` to detect when it exits
-2. When the process exits, switch to either all-system-audio capture or mic-only mode
-3. Log a warning and surface the fallback state to the UI
-4. Register for `kAudioObjectPropertyOwnedObjects` changes on the tap to detect when it becomes invalid
+**Consequences:**
+- Recording produces silence from the moment the device disappears
+- No error notification to the user
+- Meeting audio is partially or fully lost
+- Existing `onDeviceDisconnected` handler may not fire for virtual devices
 
-**Warning signs:**
-- Recordings that have long stretches of silence on the system audio channel
-- Users reporting "it recorded but there's no audio from the other participants"
-- The meeting app's process ID changing mid-meeting (some apps restart helper processes)
+**Prevention:**
+1. **Register for `kAudioHardwarePropertyDevices` changes** on the system AudioObject to detect when devices are added/removed, not just device-alive on a specific device
+2. **Periodically validate the selected device still exists** during recording (every 5-10 seconds, check device ID is in the system device list)
+3. **When the selected device disappears mid-recording**: fall back to the default system audio tap (existing behavior), log a warning, and show a persistent menu bar notification
+4. **On recording start**: verify the selected device exists before creating the capture. If it is gone, show an error and refuse to start with a clear message: "Selected audio device not found. Open Loopback first."
 
-**Phase to address:**
-Phase 2 (Error Hardening) -- recording resilience. This is a significant edge case that directly violates the core value of "reliable capture."
+**Detection:**
+- `AudioUnitRender` returning non-zero OSStatus during recording
+- `kAudioHardwarePropertyDevices` change notification with the selected device ID no longer in the list
+- Silence on the system audio channel despite active meeting
+
+**Phase to address:** Audio device selection phase. The device picker and device monitoring must be built together.
+
+**Confidence:** HIGH -- confirmed by Loopback documentation and CoreAudio behavior with virtual devices.
 
 ---
 
-### Pitfall 4: Transcript Data Loss from Non-Critical DB Write + Premature File Deletion
+### Pitfall 3: Google Calendar Sync Token Becomes Invalid (410 Gone) With No Recovery Path
 
 **What goes wrong:**
-In `TranscriptionPipeline.swift`, the pipeline writes the transcript to the database (step 5, line 93-100), then compresses the WAV to ALAC (step 6), then marks status as `.done` (step 7), then deletes the WAV (step 8). If the database write at step 5 fails (db locked, disk full, schema mismatch), the error is caught in the outer `catch` block, but by that point the `defer` block has already deleted the mono file. The pipeline sets status to `.error`, but the transcript computation is permanently lost -- the original audio is still there, but the expensive ML computation (potentially minutes of processing) must be redone.
+Google Calendar's incremental sync uses sync tokens. After the initial full sync, Caddie stores a `nextSyncToken` and uses it for subsequent requests to get only changed events. The server can invalidate this token at any time (token expiration, ACL changes, Google-side infrastructure changes), returning HTTP 410 Gone. If Caddie does not handle 410 correctly, it:
+- Keeps retrying with the stale sync token, getting 410 every time
+- Or crashes/throws an unhandled error
+- Calendar data becomes stale. New meetings are never discovered. Existing meetings are not updated.
 
-Worse: if steps 5-7 succeed but the WAV deletion at step 8 is what fails (impossible since it uses `try?`), that is harmless. But if the DB write at step 5 succeeds partially (write succeeds but the connection drops before commit in WAL mode), the transcript may be silently incomplete.
+Per Google's documentation: "The server will respond to an incremental request with a response code 410. This should trigger a full wipe of the client's store and a new full sync."
 
 **Why it happens:**
-The pipeline treats database writes as non-blocking operations. The `defer` block at line 54-57 for mono file cleanup runs regardless of which step fails. The sequencing assumes every step either fully succeeds or the outer `catch` handles it cleanly, but file cleanup via `defer` does not respect this.
+Developers often handle 200 (success) and 401 (auth), but 410 is uncommon and easy to miss. The requirement to "full wipe the client's store" is counterintuitive -- most developers retry the same request rather than resetting state.
 
-**How to avoid:**
-1. Make the database write a hard gate: if it fails, do NOT proceed to compression or file deletion. Keep all source files for retry.
-2. Remove the `defer` block for mono file cleanup. Instead, clean up mono files explicitly only after both the DB write and status update succeed.
-3. Verify the written transcript by reading it back before proceeding.
-4. Keep the WAV file until the transcript is verified in the database. Only delete it after confirming `.done` status AND transcript presence.
+**Consequences:**
+- Calendar data goes stale silently
+- Meetings added/changed after the token invalidation are never seen
+- If recovery involves a full resync, all local event IDs change, potentially breaking references from existing meeting recordings
 
-**Warning signs:**
-- Meetings with status `.done` but null/empty transcript fields in the database
-- Meetings with status `.error` where retry fails because mono file is gone
-- Log entries showing "Failed to write transcript" followed by "ALAC compression complete"
+**Prevention:**
+1. **Explicitly handle HTTP 410 in every Calendar API call path.** On 410:
+   - Delete the stored sync token
+   - Delete all cached calendar events from the local database
+   - Perform a fresh full sync
+   - Re-link any existing meeting recordings to the new event data by matching on event title + time window
+2. **Log the 410 event** prominently (not as a warning -- as an info-level recovery event)
+3. **Test this path explicitly** -- it will happen in production, probably within the first month
 
-**Phase to address:**
-Phase 2 (Error Hardening) -- pipeline resilience. This is the most common path to permanent data loss.
+**Detection:**
+- HTTP 410 response from Calendar API
+- Calendar events list in Caddie does not match user's actual Google Calendar
+- Log entries showing repeated 410 errors with no recovery
+
+**Phase to address:** Calendar sync implementation phase. Handle 410 from the start.
+
+**Confidence:** HIGH -- documented requirement in Google Calendar API sync guide.
 
 ---
 
-### Pitfall 5: Actor Reentrancy in TranscriptionPipeline Corrupts Queue State
+### Pitfall 4: Privacy Contradiction -- "Zero Cloud" App Now Sends Meeting Data to Google
 
 **What goes wrong:**
-`TranscriptionPipeline` is a Swift actor. The `processNext()` method contains multiple `await` points (ASR, diarization, DB writes). At each `await`, the actor can be reentered -- meaning `enqueue()` can run between awaits. The `isProcessing` flag is set to `true` at the start and `false` at the end, but if `enqueue()` is called while `processNext()` is suspended at an `await`, the new job is appended to `queue` correctly (actors serialize access), but the `if !isProcessing` check in `enqueue()` sees `true` and does NOT spawn a new `processNext()` Task. This is actually correct for this specific pattern.
+Caddie's core identity is "zero cloud dependency -- nothing leaves the device." Adding Google Calendar OAuth2 means:
+- Meeting titles, attendees, and times are fetched FROM Google (acceptable -- they originated there)
+- But the OAuth2 flow sends the user's Google identity to Google's auth servers (obviously necessary)
+- The app's Google Cloud Console project is tied to a developer account, meaning Google knows which users authorized Caddie
+- Google's Calendar API TOS requires a privacy policy explaining data access
+- If the app ever requests `calendar.events` (read/write) instead of `calendar.readonly`, Google requires a more invasive verification process including a security audit
 
-However, the real reentrancy bug is subtle: at line 135, `isProcessing = false` runs, then line 137-139 checks `!queue.isEmpty` and recursively calls `await processNext()`. If between `isProcessing = false` and the `queue.isEmpty` check, another call to `enqueue()` sees `isProcessing == false` and spawns its OWN `processNext()` Task, you get two concurrent pipeline executions -- violating the serial processing guarantee.
+The real pitfall is not technical but perceptual: users chose Caddie because it is private. Seeing "This app wants to access your Google Calendar" in an OAuth dialog may cause immediate trust erosion. If the privacy policy is vague or the consent screen lists unnecessary scopes, users will bail.
 
 **Why it happens:**
-Actor reentrancy is a design choice in Swift concurrency to prevent deadlocks. The tradeoff is that state can change across any `await` boundary. The recursive `await processNext()` pattern at line 137-139 creates a window where both the recursive call and a new Task from `enqueue()` can enter `processNext()`.
+Google Calendar integration is inherently a cloud dependency. There is no local-only way to read Google Calendar events.
 
-**How to avoid:**
-Use a proper serial queue pattern inside the actor:
-```swift
-private func processNext() async {
-    while !queue.isEmpty {
-        isProcessing = true
-        let job = queue.removeFirst()
-        // ... process job ...
-    }
-    isProcessing = false
-}
-```
-The `while` loop eliminates the recursive `await processNext()` call, removing the reentrancy window. The actor's serialization guarantees that `enqueue()` and the loop body cannot execute simultaneously.
+**Consequences:**
+- User trust erosion if the integration feels invasive
+- Google OAuth verification process blocks distribution if scopes are sensitive
+- Privacy policy must be written and hosted
+- If not handled carefully, breaks the brand promise
 
-**Warning signs:**
-- Two transcription jobs running concurrently (visible in logs as interleaved pipeline step messages for different meeting IDs)
-- Database write conflicts or "database is locked" errors during transcription
-- Higher-than-expected memory usage (two ML models active simultaneously)
+**Prevention:**
+1. **Request only `calendar.readonly` scope** -- never `calendar.events`. This is a "sensitive" scope but not "restricted," so verification is lighter.
+2. **Make Google Calendar integration optional** with clear UI separation. The app must work fully without it (local EventKit calendar detection remains).
+3. **Pre-sign-in explanation screen** before the OAuth dialog: explain exactly what data Caddie accesses and that meeting titles/times are stored only locally.
+4. **Write the privacy policy now**, before building the OAuth flow. It must be hosted publicly (Google requires it during consent screen configuration).
+5. **Use the "testing" mode** during development (limited to 100 users) to avoid verification delays.
+6. **Never store Google Calendar event data in a way that could be synced or exported** without the user's explicit action.
 
-**Phase to address:**
-Phase 2 (Error Hardening). Fix alongside the pipeline data-loss pitfall since both are in `TranscriptionPipeline`.
+**Detection:**
+- Users abandoning the OAuth flow without completing it (if you track this)
+- App Store reviews mentioning privacy concerns
+- Google rejecting the OAuth consent screen verification
+
+**Phase to address:** First phase -- decide the integration boundary before writing any code. The privacy policy and consent screen must be configured before the OAuth flow can be tested.
+
+**Confidence:** HIGH -- Google's verification requirements are well-documented.
 
 ---
 
-### Pitfall 6: Test Target Linker Failure Blocks All Quality Verification
+### Pitfall 5: AVAudioEngine Cannot Select a Specific Input Device -- Architecture Mismatch
 
 **What goes wrong:**
-The test target fails to link because yyjson (a C dependency of FluidAudio) produces undefined symbols when Xcode's code coverage instrumentation is enabled. The `__llvm_profile_runtime` symbol is missing because the C target is not compiled with `-fprofile-instr-generate` when coverage is on. This blocks all 10 test files from executing, meaning no hardening work can be verified through automated tests.
+Caddie's `MicrophoneCapture` uses `AVAudioEngine` for microphone capture. AVAudioEngine's `inputNode` is hardwired to the system default input device. There is no AVFoundation API to select a specific input device. If the user selects a Loopback virtual device as their audio input in Caddie's device picker, `MicrophoneCapture` cannot route to that device -- it always captures from the system default.
+
+The existing `SystemAudioCapture` uses low-level CoreAudio (HAL AudioUnit + aggregate devices) which CAN target specific devices. But `MicrophoneCapture` is built on a fundamentally different API that does not support device selection.
 
 **Why it happens:**
-When Xcode enables code coverage (`-fprofile-instr-generate -fcoverage-mapping`), it expects all linked objects to include profiling symbols. C targets compiled through SPM may not receive these flags, causing the linker to fail with undefined symbol errors. This is a known issue with mixed Swift/C SPM packages under Xcode's coverage instrumentation.
+AVAudioEngine was designed for simplicity, trading away device selection flexibility. Apple's documentation states the input node "communicates with the system's default input." This was fine for v1.0 where Caddie always captured from the default mic, but v2.0 requires targeting specific devices.
 
-**How to avoid:**
-Three options (in order of preference):
-1. **Disable code coverage for the test scheme** in Xcode (Edit Scheme > Test > Options > Code Coverage OFF). You can re-enable it later for specific targets.
-2. **Add linker flags** in the XcodeGen project spec to link the profiling runtime: `OTHER_LDFLAGS: ["-lclang_rt.profile_osx"]`
-3. **Isolate the C dependency**: create a wrapper target that re-exports FluidAudio without exposing yyjson to the test target, or use `@testable import` only on the Swift layer.
+**Consequences:**
+- Audio device picker appears to work but microphone capture ignores the selection
+- User selects "Loopback Virtual Device" but microphone still captures from MacBook built-in mic
+- The two channels (system + mic) come from different devices, causing confusion
 
-**Warning signs:**
-- `Undefined symbols for architecture arm64: "___llvm_profile_runtime"` in build logs
-- Test navigator shows 0 tests found
-- CI/CD pipeline skipping test phase entirely
+**Prevention:**
+1. **Do NOT try to change the system default input programmatically** (via `AudioObjectSetPropertyData` on `kAudioHardwarePropertyDefaultInputDevice`). This changes the global system setting and affects all apps.
+2. **Two approaches for device selection:**
+   - **Approach A (recommended):** Rewrite `MicrophoneCapture` to use the same HAL AudioUnit pattern as `SystemAudioCapture`. Use `kAudioOutputUnitProperty_CurrentDevice` to set the specific device. This gives full control over which device to capture from.
+   - **Approach B (quick but hacky):** Keep AVAudioEngine but tell users to change their system default input in System Settings. Not recommended -- terrible UX and breaks other apps.
+3. **For the Loopback/Jump Desktop use case specifically:** The user likely wants BOTH channels from the same Loopback virtual device (system audio routed through Loopback AND mic routed through Loopback). This may mean capturing a single stereo device rather than two separate devices. The AudioRecorder architecture (system + mic as separate captures) may need rethinking for this use case.
 
-**Phase to address:**
-Phase 1 (Test Infrastructure). This MUST be the very first thing fixed. Nothing else can be verified without working tests.
+**Detection:**
+- Device picker shows non-default device selected but `AVAudioEngine.inputNode.outputFormat` still shows the default device's format
+- Audio from the wrong device appearing in recordings
+
+**Phase to address:** Audio device selection phase. This is an architecture-level decision that must be made before building the device picker UI.
+
+**Confidence:** HIGH -- confirmed by Apple documentation and multiple AudioKit/Apple Forum threads.
 
 ---
 
-### Pitfall 7: FTS5 Content-Sync Triggers Desync During Concurrent Reads/Writes
-
-**What goes wrong:**
-`Migrations.swift` creates FTS5 with `content=meetings` and three sync triggers (INSERT, DELETE, UPDATE). If the app crashes between a meetings table write and the trigger-fired FTS5 update (possible in WAL mode where the write to the meetings table and the trigger's write to FTS5 are part of the same transaction but the crash happens during WAL checkpoint), the FTS5 index becomes inconsistent with the content table. Search results will miss recent meetings or return stale data. The FTS5 `rebuild` command is the only recovery, but nothing in the app detects or triggers this.
-
-**Why it happens:**
-FTS5 content-sync tables place the burden of synchronization on the programmer (per SQLite documentation). While triggers handle the common case, crash recovery is not guaranteed -- if the WAL file is corrupted during a checkpoint, the trigger-based sync can lose updates. Additionally, manually executing raw SQL that bypasses triggers (e.g., direct `UPDATE meetings SET transcript = ?` as done in the pipeline) fires the UPDATE trigger correctly, but if the `old.transcript` value is very large (full meeting transcripts can be megabytes), the DELETE+INSERT into FTS5 on every status update is expensive and can cause WAL growth.
-
-**How to avoid:**
-1. Add an FTS5 integrity check on app startup: `INSERT INTO meetings_fts(meetings_fts) VALUES('integrity-check')`. If it fails, run `INSERT INTO meetings_fts(meetings_fts) VALUES('rebuild')`.
-2. Consider using GRDB's built-in FTS5 support (`db.makeFTS5Pattern`) instead of raw SQL triggers for better integration.
-3. Be aware that every `UPDATE meetings` triggers a full FTS5 delete+insert cycle. Minimize updates to rows with large transcript fields, or restructure so the transcript column is not in the FTS5 index (index only title and a summary field).
-
-**Warning signs:**
-- Search returns no results for meetings that clearly exist
-- Database file growing unexpectedly (WAL file bloat from large FTS5 trigger operations)
-- Slow database writes during transcript updates (the FTS5 trigger processes the full transcript text)
-- `SQLITE_CORRUPT` errors on FTS5 queries after a crash
-
-**Phase to address:**
-Phase 3 (Database Hardening / Data Integrity). Add integrity checks and consider restructuring the FTS5 index to exclude full transcript text.
+## Moderate Pitfalls
 
 ---
 
-### Pitfall 8: Disk Full Mid-Recording Produces Corrupted WAV with No User Warning
+### Pitfall 6: Google OAuth Loopback Redirect Blocked by Firewall or Port Conflict
 
 **What goes wrong:**
-`AudioRecorder.writeToFile()` calls `ExtAudioFileWrite` and logs an error if it fails, but does not stop recording or notify the user. Recording continues, accumulating samples in memory buffers that can never be flushed to disk. When the recording eventually stops, `ExtAudioFileDispose` is called on a partially-written file. The resulting WAV file has a valid header but truncated data -- it may play partially or be rejected by the transcription pipeline. The user sees the meeting marked as "recorded" with no indication of the problem.
+Google OAuth2 for desktop apps uses a loopback HTTP redirect (`http://127.0.0.1:<port>`). The flow opens the system browser, user authorizes, and Google redirects back to the local HTTP server that the app started. This fails when:
+- A local firewall blocks the loopback connection
+- Another app is already using the same port
+- The port chosen is in a reserved range
+- macOS's application firewall prompts "Do you want the application to accept incoming network connections?" -- user clicks "Deny"
 
 **Why it happens:**
-`ExtAudioFileWrite` returns an `OSStatus` error code for disk-full conditions, but the error handling at line 201-203 only logs it. There is no mechanism to propagate the error back to the recording lifecycle (the write happens inside a lock-protected callback chain). The recording continues operating on the assumption that writes succeed.
+The loopback redirect requires starting a temporary HTTP server. This is the Google-recommended approach for desktop apps, but it has real-world failure modes that are rare but devastating when they occur.
 
-**How to avoid:**
-1. Check available disk space before starting recording (minimum 500MB for a 1-hour meeting at 16kHz stereo 16-bit = ~220MB WAV)
-2. Monitor `ExtAudioFileWrite` return values and set an error flag that the main-thread flush loop checks
-3. When disk is critically low, stop recording gracefully, save what has been written, and notify the user
-4. On app startup, check for WAV files with no corresponding `.done` status and offer recovery
+**Prevention:**
+1. **Bind to port 0** and let the OS assign an available port. Pass this port in the redirect_uri. Google's documentation supports dynamic port assignment for loopback redirects.
+2. **Handle EADDRINUSE** by trying multiple ports (or relying on port 0).
+3. **Set a timeout** (30-60 seconds) on the local server. If no redirect arrives, show an error with a "Try Again" button.
+4. **Consider `ASWebAuthenticationSession`** as an alternative to the loopback server. It handles the browser flow natively on macOS and does not require a local HTTP server. However, it uses a custom URL scheme redirect which Google has deprecated for some client types -- verify compatibility with your Google Cloud Console client ID configuration.
+5. **Implement PKCE** (Proof Key for Code Exchange) regardless of which redirect mechanism is used. Google requires it for native apps.
 
-**Warning signs:**
-- WAV files that are significantly smaller than expected for the meeting duration
-- `ExtAudioFileWrite` errors in logs (OSStatus -34 = `eofErr`, -39 = `dskFulErr`)
-- Transcription failures on meetings that "recorded successfully"
+**Detection:**
+- OAuth flow opens browser but Caddie never receives the redirect
+- macOS firewall prompt appearing during sign-in
+- User reports "I authorized but nothing happened"
 
-**Phase to address:**
-Phase 2 (Error Hardening). Add pre-recording disk check and mid-recording monitoring.
+**Phase to address:** OAuth implementation phase.
+
+**Confidence:** MEDIUM -- loopback redirect is the documented standard, but edge cases depend on user's system configuration.
 
 ---
 
-### Pitfall 9: Weak Self in Meeting Lifecycle Callbacks Silently Drops Events
+### Pitfall 7: Keychain Token Storage Survives App Deletion -- Stale Tokens After Reinstall
 
 **What goes wrong:**
-`AppState.swift:74-79` sets up meeting lifecycle callbacks with `[weak self]`:
-```swift
-detector.onMeetingStarted = { [weak self] meeting in
-    self?.startRecording(meeting: meeting)
-}
-```
-If `AppState` is deallocated (or temporarily nil due to SwiftUI view lifecycle), the callback fires but `self?` is nil. The meeting detection succeeds, but recording never starts. No error is logged, no UI indication -- the meeting is simply missed. Similarly for `onMeetingEnded`: if `self` is nil, recording continues indefinitely.
+macOS Keychain items persist even after the app is uninstalled and reinstalled. If a user uninstalls Caddie (deleting the app and its Application Support data), then reinstalls, the Keychain still contains the old OAuth tokens. On first launch, the app finds valid-looking tokens in Keychain, skips the sign-in flow, and tries to use them. If the refresh token was revoked (user revoked access in Google Account settings), every API call fails with `invalid_grant` but the app thinks the user is signed in.
+
+Conversely, if the Keychain entry is from a different bundle ID (developer changed signing identity during development), the Keychain items are inaccessible and the app silently fails to read them.
 
 **Why it happens:**
-`[weak self]` is the standard pattern to avoid retain cycles. But in this architecture, `AppState` is the central coordinator -- if it goes away, the entire app is non-functional. The callbacks silently no-op via optional chaining, which is the opposite of what the core value ("every meeting must be reliably captured") requires.
+macOS Keychain is designed to persist credentials across app reinstalls. This is usually a feature (password managers), but for OAuth tokens it creates stale state. The bundle ID and team ID must match exactly for Keychain access.
 
-**How to avoid:**
-For lifecycle-critical callbacks, use `[weak self]` with a guard and explicit error logging:
-```swift
-detector.onMeetingStarted = { [weak self] meeting in
-    guard let self else {
-        Logger.error("AppState deallocated during meeting detection -- meeting missed")
-        return
-    }
-    self.startRecording(meeting: meeting)
-}
-```
-Better yet: ensure `AppState` outlives the detector. If `AppState` owns `detector`, and `detector` holds a callback referencing `AppState`, use `[unowned self]` (since `AppState` is guaranteed to outlive `detector`). Or restructure to use delegation or `@Observable` pattern instead of closures.
+**Prevention:**
+1. **On first launch** (check a UserDefaults flag), validate stored tokens by making a lightweight API call (e.g., `userinfo` endpoint or `calendarList.list` with `maxResults=1`). If the call fails, clear Keychain tokens and show the sign-in flow.
+2. **Use `kSecAttrService` that includes a version identifier** so that major app updates can distinguish between token formats.
+3. **Always handle `errSecItemNotFound` (-25300)** gracefully when reading from Keychain -- it is the expected state on fresh install.
+4. **Handle `errSecDuplicateItem` (-25299)** when writing -- use `SecItemUpdate` instead of `SecItemAdd` when an item already exists.
+5. **Include a "Sign Out" button** in Settings that explicitly deletes Keychain tokens and revokes the Google token via the revocation endpoint.
 
-**Warning signs:**
-- Meetings detected in logs but no corresponding recording started
-- Grace period expiring with no `stopRecording` call
-- Orphaned `MeetingDetector` instances in memory profiler
+**Detection:**
+- App shows "Connected to Google Calendar" but sync fails
+- Keychain contains tokens from a previous installation
+- `errSecDuplicateItem` errors when storing new tokens
 
-**Phase to address:**
-Phase 2 (Error Hardening). Fix weak-self patterns alongside other reliability work.
+**Phase to address:** OAuth implementation phase.
+
+**Confidence:** HIGH -- well-documented Keychain behavior.
 
 ---
 
-### Pitfall 10: AppState Initialization Race -- Pipeline Nil When Meeting Ends During Init
+### Pitfall 8: Calendar Polling Frequency vs. API Quota -- Either Too Slow or Rate Limited
 
 **What goes wrong:**
-`AppState.initialize()` is async and contains multiple `await` points (model download, ASR init, diarization init). The detector is started at line 80, AFTER pipeline creation at line 71. But if `initialize()` is called and a meeting is already in progress (user joins a Zoom call, then opens Caddie), the detector fires immediately. The `startRecording()` call succeeds (it does not require the pipeline), but when the meeting ends, `stopRecording()` at line 207 checks `guard let pipeline = pipeline` and finds it nil because initialization has not completed. The meeting's audio is recorded but never transcribed, and the meeting stays in "transcribing" status forever.
+Google Calendar API has per-minute-per-user quotas (exact numbers vary, visible in Cloud Console). If Caddie polls too frequently:
+- Hits rate limits, gets 403/429 errors
+- Google may throttle the entire project if many users hit limits
+
+If Caddie polls too infrequently:
+- Misses last-minute meeting additions or time changes
+- Meeting starts before Caddie knows about it
+- Violates core value of reliable capture
+
+The CalendarMonitor currently polls EventKit every 30 seconds. Applying the same frequency to Google Calendar API would be ~2,880 requests/day per user -- likely fine for quotas but wasteful.
 
 **Why it happens:**
-The initialization sequence starts detection before the pipeline is ready. There is no readiness gate between "detection active" and "pipeline available." The model download alone can take minutes on first launch.
+Google strongly recommends push notifications over polling but push notifications require a publicly accessible HTTPS endpoint, which a desktop app does not have. Push notifications need a webhook server, which contradicts the "no cloud dependency" principle.
 
-**How to avoid:**
-1. Do not start the detector until the pipeline is fully initialized
-2. Or: queue meetings that end before the pipeline is ready, and process them once initialization completes
-3. Add a `pipelineReady` state that `stopRecording` checks, and if not ready, stores the meeting ID for deferred transcription
+**Prevention:**
+1. **Use incremental sync with sync tokens** instead of full event list fetches. Each incremental sync is a single API call regardless of how many events changed.
+2. **Smart polling frequency:**
+   - Normal: every 5 minutes (sufficient for most meetings which are scheduled in advance)
+   - Near meeting start (within 15 minutes of any known event): every 60 seconds
+   - No upcoming meetings in next 2 hours: every 15 minutes
+3. **Cache the events list locally** in the GRDB database. Only query Google for changes (sync token).
+4. **Respect exponential backoff** on 403/429 responses. Do not retry immediately.
+5. **Supplement Google Calendar polling with local EventKit** -- EventKit has no rate limits and reflects Google Calendar changes if the user has their Google account added to macOS Calendar. This hybrid approach gives near-instant detection with Google API as the authoritative source.
+6. **Pre-fetch tomorrow's events** before midnight so morning meetings are already known.
 
-**Warning signs:**
-- Meetings stuck in "transcribing" status indefinitely
-- Log entry: "Cannot enqueue transcription -- pipeline not initialized"
-- First-launch users who join a meeting before onboarding completes lose their first transcript
+**Detection:**
+- 403/429 responses from Calendar API
+- Meetings starting without Caddie detecting them
+- High API quota usage visible in Google Cloud Console
 
-**Phase to address:**
-Phase 2 (Error Hardening). This is the initialization ordering bug.
+**Phase to address:** Calendar sync implementation phase.
+
+**Confidence:** HIGH -- Google's quota documentation and sync guide are authoritative.
 
 ---
 
-## Technical Debt Patterns
+### Pitfall 9: Audio Device Hot-Plug Changes Device ID -- Saved Preference Becomes Invalid
 
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| `try?` without logging | Avoids writing error handling boilerplate | Impossible to diagnose failures in production; silent data loss | Never in recording/transcription/DB paths. Acceptable only for truly best-effort operations like deleting a temp file that may not exist |
-| `defer` for file cleanup | Guarantees cleanup runs | Cleanup runs even when the file is still in use by an async operation. Creates race conditions with concurrent consumers | Never when the file is shared across async boundaries. Use explicit cleanup after all consumers complete |
-| Optional database parameter per-job (`database: AppDatabase?`) | Allows pipeline to work without DB in tests | Database reference can become stale between enqueue and processing. Every pipeline step must nil-check. Missing DB means transcripts are computed but never saved | Never in production. Inject database at pipeline init time, not per-job |
-| `NSLock` for audio buffer synchronization | Simple API, familiar pattern | Priority inversion on real-time audio thread, potential deadlocks | Never for audio thread synchronization. Use lock-free ring buffers |
-| Raw SQL strings in pipeline | Quick to write, no ORM overhead | SQL injection risk (low since values are parameterized), no compile-time validation, migration breakage not caught at compile time | Acceptable for simple queries, but wrap in tested helper methods |
+**What goes wrong:**
+CoreAudio assigns `AudioDeviceID` values dynamically. They are NOT persistent across system restarts or device reconnects. If the user selects "Loopback Virtual Device" in Caddie's settings, the app saves the `AudioDeviceID` (an integer). After a restart, the same device gets a different `AudioDeviceID`. The saved preference now points to the wrong device or no device at all.
 
-## Integration Gotchas
+Even `AudioDeviceUID` (a string) can change for some virtual devices when the creating application (Loopback) is restarted.
 
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| CoreAudio Process Taps (macOS 14.2+) | Assuming the process tap API is stable across macOS versions. macOS 26 changed USB audio device IO Registry entries, breaking device-to-LocationID mapping for some apps | Pin minimum macOS version in `project.yml`. Test on each new macOS release. Do not rely on undocumented HAL properties |
-| FluidAudio / yyjson | Treating it as a pure Swift package. yyjson is a C dependency that requires special linker handling for code coverage, and its memory model does not integrate with Swift ARC | Isolate FluidAudio behind a protocol. Mock in tests. Disable coverage for the C target specifically |
-| GRDB DatabasePool | Using `dbWriter.write` from the main thread for quick operations. GRDB's `DatabasePool` in WAL mode can block the writer queue if a long-running read snapshot holds a WAL checkpoint | Use `dbWriter.asyncWrite` for all writes from the main thread. Or use `writeWithoutTransaction` for simple single-statement updates |
-| macOS Screen & System Audio Permission | Assuming permission is granted once forever. macOS Sequoia added monthly re-prompts for screen recording. Permission can be revoked in System Settings while the app is running | Check permission status before each recording start. Register for permission change notifications. Handle mid-recording permission revocation gracefully |
-| EventKit (Calendar Access) | Calling `requestFullAccessToEvents` on the main thread and expecting a synchronous response. The system dialog blocks UI | Always call from a background context. Handle the "undetermined" state explicitly in the UI |
+**Why it happens:**
+`AudioDeviceID` is a transient handle, not a stable identifier. Apple's documentation states it is valid only for the current boot session. `AudioDeviceUID` is more stable for hardware devices but virtual devices may regenerate UIDs.
 
-## Performance Traps
+**Prevention:**
+1. **Store the device UID string** (`kAudioDevicePropertyDeviceUID`), NOT the `AudioDeviceID` integer.
+2. **On app launch and before each recording**, resolve the stored UID to a current `AudioDeviceID` by enumerating all devices and matching UIDs.
+3. **If the UID is not found**: show a clear warning ("Configured audio device not found. Using default.") and fall back to the default device or the process tap behavior.
+4. **Also store the device name** as a human-readable fallback. If UID lookup fails, offer to re-select from the current device list.
+5. **Listen for `kAudioHardwarePropertyDevices` changes** to detect when devices are added/removed and update the device picker dynamically.
 
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| FTS5 full-transcript indexing | Slow UPDATE triggers (FTS5 delete+insert on every status change), WAL file bloat | Index only title, app, and a summary field. Keep full transcript in a non-indexed column | Meetings longer than 30 minutes produce transcripts >100KB, making every status update expensive |
-| Unbounded transcription queue | Memory pressure from storing many pending jobs, potential OOM if ML models are loaded per-job | Cap queue at 10-20 items. Drop or defer excess jobs with user notification | Back-to-back meetings with no processing gaps (3+ meetings queuing up) |
-| Array `removeFirst` in ring-buffer pattern | O(n) array copy on every flush cycle (1600 samples at 16kHz = every 100ms) | Use a circular buffer with head/tail indices, or `Data` with `replaceSubrange` | Long recordings (>1 hour) where cumulative allocation pressure causes GC pauses |
-| Full table scan on meetings list | UI lag when loading meeting list as database grows | Add proper indexes (already have date/status). Paginate queries. Use GRDB's `ValueObservation` for incremental updates | After 500+ meetings in the database |
-| Mono mixdown creating full copy of audio | Doubles disk usage temporarily (stereo WAV + mono WAV in temp) | Check available space before mixdown. Clean up immediately after both ASR and diarization complete | Recordings >1GB (meetings >2 hours) on machines with limited free space |
+**Detection:**
+- App settings show a device name but recording captures from a different device
+- `AudioObjectGetPropertyData` with the stored UID returning `kAudioObjectUnknown`
+- Log messages: "Saved device UID not found in current device list"
 
-## Security Mistakes
+**Phase to address:** Audio device selection phase. The persistence mechanism is part of the device picker design.
 
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| Storing audio files with predictable names in Application Support | Any app with file system access can enumerate and read meeting recordings | Use randomized subdirectories or encrypt audio at rest. File-level encryption with a keychain-stored key |
-| No validation of meeting titles from window scraping | Meeting titles from Accessibility API could contain malicious content if rendered as HTML/markdown in export | Sanitize all externally-sourced strings before display or export. Use `String` not `AttributedString` for raw titles |
-| Database file unencrypted | SQLite database with full meeting transcripts is readable by any process with file access | Consider SQLCipher or GRDB's encryption extension for the database file. At minimum, ensure the app's container is properly sandboxed |
-| Model download over HTTP without certificate pinning | MITM attack could replace ML models with adversarial versions | Verify model checksums after download. Use HTTPS with certificate pinning for model server |
+**Confidence:** HIGH -- confirmed by CoreAudio documentation and SimplyCoreAudio source code.
 
-## UX Pitfalls
+---
 
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Silent mic-only fallback when system audio fails | User thinks they have full stereo recording but only has their own voice. Remote participants are inaudible | Show a persistent warning badge in the menu bar: "System audio unavailable -- recording microphone only" |
-| No indication of transcription progress | User sees "transcribing" status with no progress bar. For a 1-hour meeting, transcription can take 5-15 minutes. User thinks app is frozen | Show estimated time remaining based on audio duration. Update progress as ASR/diarization complete |
-| Permission request at first launch with no explanation | macOS permission dialogs are cryptic. User denies Screen Recording because they do not understand why a "meeting recorder" needs it | Show a pre-permission screen explaining what each permission does and why it is needed. Request permissions one at a time |
-| Meetings stuck in "transcribing" or "error" with no recovery path | User has no way to fix a broken meeting except deleting it | Add "Retry Transcription" button (exists but only works if WAV file is preserved). Add "Mark as Failed" to clear stuck states |
+### Pitfall 10: Sample Rate Mismatch Between Loopback Virtual Device and Caddie's 16kHz Target
 
-## "Looks Done But Isn't" Checklist
+**What goes wrong:**
+Loopback virtual devices typically operate at 44.1kHz or 48kHz. Caddie's `SystemAudioCapture` configures the AudioUnit output to 16kHz mono (`targetSampleRate = 16000.0`). CoreAudio's AudioUnit performs automatic sample rate conversion, but:
+- If the source device's sample rate does not divide evenly into 16kHz, the conversion introduces artifacts
+- Some virtual devices report a sample rate of 0 or an unexpected rate when first created
+- If the Loopback device's sample rate changes mid-recording (user adjusts Loopback configuration), the AudioUnit may fail silently or produce garbled audio
 
-- [ ] **Audio Recording:** Verify system audio channel actually contains audio (not silence). A successful recording with silent system channel means the tap failed silently.
-- [ ] **Transcription Pipeline:** Verify transcript is in the database AND the meeting status is `.done`. Status can be `.done` with null transcript if the DB write failed but status update succeeded.
-- [ ] **ALAC Compression:** Verify the `.m4a` file plays correctly after compression. A zero-byte or truncated ALAC means compression failed but deletion proceeded.
-- [ ] **FTS5 Search:** Verify search returns the meeting you just transcribed. FTS5 can be out of sync with the content table after crashes.
-- [ ] **Test Infrastructure:** After fixing the linker issue, verify tests actually RUN (not just compile). A green build with 0 tests executed gives false confidence.
-- [ ] **Meeting Detection:** Verify detection works for ALL supported apps (Zoom, Teams, Meet, Slack, Discord, Webex, FaceTime). Pattern changes in app updates break detection silently.
-- [ ] **Temp File Cleanup:** After a recording+transcription cycle, verify no `caddie_mono_*` files remain in the system temp directory.
-- [ ] **Database Migration:** After adding a new migration, test it against a database created by the PREVIOUS version. Fresh installs always work; upgrades are where migrations break.
+Additionally, per community reports: macOS virtual audio devices sometimes output at 44100Hz regardless of their configured sample rate.
+
+**Why it happens:**
+CoreAudio's automatic sample rate conversion is designed for hardware devices with stable sample rates. Virtual devices are more dynamic and may report inconsistent rates.
+
+**Prevention:**
+1. **Query the selected device's actual sample rate** before creating the AudioUnit and log it.
+2. **If the sample rate is 0 or unexpected**, warn the user and suggest checking Loopback configuration.
+3. **Set the AudioUnit's input format to match the device's native rate**, then let the AudioUnit convert to 16kHz on output. This is what the current code does, but verify it works for all Loopback configurations.
+4. **Register for `kAudioDevicePropertyNominalSampleRate` changes** on the selected device to detect mid-recording rate changes. If it changes, log a warning.
+5. **Test with actual Loopback configurations** -- 44.1kHz and 48kHz at minimum.
+
+**Detection:**
+- Audio playback sounds pitched up/down (wrong sample rate)
+- `AVAudioConverter` errors during format conversion
+- Loopback device showing different sample rate than expected in Audio MIDI Setup
+
+**Phase to address:** Audio device selection phase, during integration testing.
+
+**Confidence:** MEDIUM -- CoreAudio conversion generally works, but virtual device quirks are real.
+
+---
+
+### Pitfall 11: Google Calendar Scope is "Sensitive" -- Requires Verification for >100 Users
+
+**What goes wrong:**
+`calendar.readonly` is classified by Google as a "sensitive scope." Apps requesting sensitive scopes must pass Google's OAuth app verification process before they can be used by more than 100 users. The verification process requires:
+- A privacy policy hosted on a public URL
+- A demonstration video showing the OAuth flow and how data is used
+- Written justification for each scope
+- Review by Google (timeline: days to weeks)
+
+If verification is not completed before distribution, users beyond the first 100 see "This app isn't verified" with a scary warning screen, or are blocked entirely.
+
+**Why it happens:**
+Google tightened OAuth verification in response to phishing attacks. Calendar scopes are sensitive because they expose meeting titles, attendees, and schedules.
+
+**Prevention:**
+1. **Start the verification process early** -- submit during development, not after building the feature.
+2. **Use "testing" mode** in Google Cloud Console during development. Add your test Google accounts as test users (up to 100).
+3. **Prepare the privacy policy** as one of the first tasks. It needs a public URL.
+4. **Record the demo video** showing: consent screen -> user grants access -> app reads calendar -> data stays local.
+5. **If Caddie will be distributed to a small user base** (personal use / <100 users), testing mode may be sufficient permanently.
+
+**Detection:**
+- Users seeing "This app isn't verified" warning
+- Users blocked from completing OAuth flow
+- Google rejecting verification submission
+
+**Phase to address:** First phase of calendar integration -- before any code.
+
+**Confidence:** HIGH -- Google's documentation is explicit about this requirement.
+
+---
+
+## Minor Pitfalls
+
+---
+
+### Pitfall 12: EventKit CalendarMonitor and Google Calendar Produce Duplicate Meeting Detections
+
+**What goes wrong:**
+The existing `CalendarMonitor` reads from macOS EventKit (which includes Google Calendar events if the user has their Google account added to macOS Calendar). The new Google Calendar API integration reads from the same Google Calendar directly. If both monitors are active, every Google Calendar meeting is detected twice -- once via EventKit, once via the API. This triggers double recording attempts or confusing UI state.
+
+**Prevention:**
+1. **When Google Calendar is connected**, disable the EventKit monitor for Google calendars. Keep EventKit active only for non-Google calendars (iCloud, Exchange, etc.).
+2. **Or**: use EventKit as the primary source and Google Calendar API only for features EventKit cannot provide (attendee details, conference links, extended properties).
+3. **Deduplicate by event title + start time** if both sources remain active. Use a 5-minute window for start time matching.
+
+**Phase to address:** Calendar integration phase, when wiring up the new Google Calendar monitor alongside the existing EventKit monitor.
+
+**Confidence:** HIGH -- direct codebase observation. `CalendarMonitor.swift` already polls EventKit every 30 seconds.
+
+---
+
+### Pitfall 13: OAuth Consent Screen Shows Caddie's Developer Email to Users
+
+**What goes wrong:**
+Google's OAuth consent screen displays the developer's email address (or the support email configured in the Cloud Console) to users. If this is a personal email (e.g., `yash@gmail.com`), it looks unprofessional and may concern privacy-conscious users.
+
+**Prevention:**
+1. **Configure a support email** in the Google Cloud Console OAuth consent screen settings that looks professional.
+2. **Set the app name, logo, and developer info** carefully -- users see this during authorization.
+3. **Test the consent screen** in an incognito browser to see exactly what users will see.
+
+**Phase to address:** OAuth setup phase (Google Cloud Console configuration).
+
+**Confidence:** HIGH -- visible in every OAuth flow.
+
+---
+
+### Pitfall 14: Entitlements File Needs Network Access for OAuth
+
+**What goes wrong:**
+Caddie's current entitlements (`Resources/Caddie.entitlements`) include only `com.apple.security.device.audio-input` and `com.apple.security.personal-information.calendars`. The app is NOT sandboxed (no `com.apple.security.app-sandbox`), so network access is unrestricted. However, if the app is ever sandboxed for Mac App Store distribution:
+- `com.apple.security.network.client` entitlement is needed for outgoing HTTP (OAuth, Calendar API)
+- `com.apple.security.network.server` entitlement might be needed for the loopback OAuth redirect server
+- Keychain access behavior changes in sandboxed apps (scoped to the app's container)
+
+**Prevention:**
+1. **If staying unsandboxed** (current state): no entitlement changes needed for network access. Keychain works normally.
+2. **If considering sandboxing later**: plan for the entitlements now. Test OAuth flow in both sandboxed and unsandboxed modes.
+3. **Document the decision** to stay unsandboxed and why (CoreAudio process taps require unsandboxed access).
+
+**Phase to address:** Before implementation begins. This is a project-level architecture decision.
+
+**Confidence:** HIGH -- entitlements verified from codebase.
+
+---
+
+### Pitfall 15: All-Day Calendar Events Trigger False Recording Starts
+
+**What goes wrong:**
+The existing `CalendarMonitor` filters out all-day events (`!event.isAllDay`). The Google Calendar API also returns all-day events in `events.list`. If the Google Calendar integration does not apply the same filter, all-day events (e.g., "PTO", "Sprint 23", "Company Holiday") trigger meeting detection and recording attempts that run all day.
+
+Additionally, Google Calendar's incremental sync has a known issue where all-day events sometimes return empty `items` arrays, which could cause false "event ended" signals.
+
+**Prevention:**
+1. **Apply the same filters** as the existing CalendarMonitor: exclude all-day events, require 2+ attendees.
+2. **Add additional filters**: exclude events the user has declined, exclude events without a conference link (optional, configurable).
+3. **Test with all-day events, recurring events, and multi-day events** -- each has different behavior in the API response.
+
+**Phase to address:** Calendar sync implementation phase.
+
+**Confidence:** HIGH -- existing CalendarMonitor already handles this; ensure parity.
+
+---
+
+## Phase-Specific Warnings
+
+| Phase Topic | Likely Pitfall | Severity | Mitigation |
+|-------------|---------------|----------|------------|
+| OAuth2 Setup (Cloud Console) | Sensitive scope verification delays | HIGH | Start verification process before writing code. Use testing mode during development |
+| OAuth2 Implementation | Token refresh race condition | CRITICAL | Serialize all refresh attempts through a single actor. Proactive refresh before expiry |
+| OAuth2 Token Storage | Keychain stale tokens after reinstall | MODERATE | Validate tokens on first launch. Handle all SecItem error codes |
+| OAuth2 Redirect | Loopback HTTP server port conflicts | MODERATE | Use port 0 for OS-assigned port. Add timeout and retry |
+| Calendar Sync | Sync token invalidation (410 Gone) | HIGH | Handle 410 by clearing state and performing full resync |
+| Calendar Sync | Polling frequency vs. rate limits | MODERATE | Smart adaptive polling with sync tokens. Supplement with EventKit |
+| Calendar Sync | Duplicate detection (EventKit + Google API) | MODERATE | Disable EventKit for Google calendars when API is connected |
+| Calendar Sync | All-day / declined events triggering recording | LOW | Mirror existing CalendarMonitor filters |
+| Audio Device Picker | AVAudioEngine cannot select non-default device | CRITICAL | Rewrite MicrophoneCapture to use HAL AudioUnit (same as SystemAudioCapture) |
+| Audio Device Picker | Device ID not persistent across restarts | HIGH | Store device UID, resolve to ID at runtime |
+| Audio Device Picker | Virtual device disappears mid-recording | HIGH | Monitor kAudioHardwarePropertyDevices + periodic validation |
+| Audio Device Picker | Sample rate mismatch with virtual devices | MODERATE | Query actual rate, configure AudioUnit accordingly |
+| Privacy/Trust | "Zero cloud" identity contradicted by Google OAuth | HIGH | Make integration optional. Pre-sign-in explanation. Privacy policy |
+| Entitlements | Missing network entitlements if sandboxed | LOW | Document decision to stay unsandboxed |
+
+---
+
+## Integration Pitfalls Specific to Caddie's Architecture
+
+| Existing Component | New Feature | Integration Risk | Mitigation |
+|-------------------|-------------|------------------|------------|
+| `CalendarMonitor` (EventKit) | Google Calendar API monitor | Duplicate detection, conflicting signals | Deduplicate by event + time window. Prefer Google API when connected |
+| `MeetingDetector` (multi-signal) | Calendar-as-primary detection | Signal priority confusion -- which source wins? | Define clear priority: Google Calendar > EventKit > audio process + mic |
+| `AudioRecorder` (system + mic) | User-selected device | MicrophoneCapture uses AVAudioEngine (no device selection) | Rewrite to HAL AudioUnit or accept default-mic-only limitation |
+| `SystemAudioCapture` (process tap) | Device-based capture | Two different capture modes (process tap vs. device tap) | Abstract behind a protocol with two implementations |
+| `AppState.initialize()` | OAuth token validation | More async work in an already-complex init sequence | OAuth token check should be independent of ML pipeline init |
+| `RecordingCoordinator` | Calendar-triggered recording | Coordinator expects detection signals, not scheduled triggers | Add a `scheduledStart(at:)` method for pre-meeting recording start |
+| `Permissions.swift` | Google OAuth permission state | New permission type that does not use macOS system prompts | Add Google Calendar connection status to permissions check flow |
+
+---
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| NSLock priority inversion causing audio glitches | MEDIUM | Replace NSLock with lock-free ring buffer. Requires rewriting buffer management in AudioRecorder but the interface stays the same |
-| Unmanaged.passUnretained crash | LOW | Switch to passRetained + explicit release in stop(). Two-line change + verification |
-| Process tap invalidation | MEDIUM | Add process monitoring + fallback to all-system-audio. Requires new DispatchSource and UI state |
-| Transcript data loss from premature file deletion | MEDIUM | Restructure pipeline step ordering: remove defer, add explicit cleanup gates. Requires careful sequencing |
-| Actor reentrancy in pipeline | LOW | Replace recursive `await processNext()` with `while` loop. Small change, big impact |
-| Test target linker failure | LOW | Disable code coverage or add linker flag. One-line fix in project config |
-| FTS5 desync after crash | LOW | Add integrity check + rebuild on app startup. Self-healing |
-| Disk full mid-recording | MEDIUM | Add pre-recording check + mid-recording monitoring. Requires error propagation from write callback |
-| Weak self dropping meeting events | LOW | Add guard-let + logging to all lifecycle callbacks. Mechanical fix |
-| Initialization race condition | MEDIUM | Reorder init to start detection last, or add deferred queue for pre-pipeline meetings |
+| Token refresh race | MEDIUM | Add actor-based refresh serialization. Touch all Calendar API call sites |
+| Virtual device disappears | MEDIUM | Add device-list listener + periodic validation + fallback. ~100 LOC |
+| Sync token 410 Gone | LOW | Add 410 handler with full resync. ~30 LOC per API call site |
+| Privacy contradiction | LOW (planning) | Write privacy policy, add pre-sign-in screen, make feature optional |
+| AVAudioEngine device limit | HIGH | Rewrite MicrophoneCapture to HAL AudioUnit. ~200 LOC + testing |
+| Loopback redirect blocked | LOW | Use port 0, add timeout. ~20 LOC |
+| Keychain stale tokens | LOW | Add first-launch validation. ~30 LOC |
+| Polling frequency | LOW | Implement adaptive polling schedule. ~50 LOC |
+| Device ID not persistent | LOW | Store UID instead of ID. ~20 LOC change + migration |
+| Sample rate mismatch | LOW | Query rate before capture setup. ~10 LOC |
+| Duplicate detection | MEDIUM | Deduplication logic + EventKit/Google priority system. ~100 LOC |
+| Scope verification | LOW (process) | Submit verification early. No code change needed |
 
-## Pitfall-to-Phase Mapping
+---
 
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| Test linker failure (yyjson) | Phase 1: Test Infrastructure | `xcodebuild test` succeeds with >0 tests executed |
-| NSLock priority inversion | Phase 2: Recording Hardening | No Thread Performance Checker warnings during recording. Audio playback has no glitches |
-| Unmanaged crash on dealloc | Phase 2: Recording Hardening | Stress test: start/stop recording 100 times rapidly with no crashes |
-| Process tap invalidation | Phase 2: Recording Hardening | Kill the meeting app mid-recording; verify fallback to system audio and user notification |
-| Transcript data loss | Phase 2: Pipeline Hardening | Simulate DB write failure (e.g., read-only DB); verify transcript is preserved for retry |
-| Actor reentrancy | Phase 2: Pipeline Hardening | Enqueue 5 jobs rapidly; verify serial processing (no interleaved log entries) |
-| Weak self callbacks | Phase 2: Error Hardening | All lifecycle callbacks log when self is nil. Integration test verifies end-to-end flow |
-| Init race condition | Phase 2: Error Hardening | Start app with meeting already in progress; verify deferred transcription completes |
-| Disk full mid-recording | Phase 2: Error Hardening | Fill disk to <100MB, start recording; verify graceful error and user notification |
-| FTS5 desync | Phase 3: Data Integrity | Force-kill app during transcription write; restart; verify search finds the meeting |
-| Silent `try?` suppression | Phase 2: Error Hardening (spread across all files) | `grep -r "try?" Sources/` returns 0 results in recording/pipeline/DB code paths |
-| FTS5 performance with large transcripts | Phase 3: Data Integrity | Benchmark UPDATE trigger time with 1MB transcript. Must be <100ms |
+## "Looks Done But Isn't" Checklist
+
+- [ ] **OAuth Flow:** User completes sign-in AND token is stored in Keychain AND a test API call succeeds. A completed browser redirect does not mean auth is working.
+- [ ] **Token Refresh:** Wait 61 minutes after sign-in and verify the next Calendar API call still succeeds (access token expired and was auto-refreshed).
+- [ ] **Calendar Sync:** Add a meeting to Google Calendar, wait for the next poll cycle, verify it appears in Caddie. Then delete the meeting and verify it disappears.
+- [ ] **Sync Token Recovery:** Manually corrupt the stored sync token and verify the app performs a full resync without crashing.
+- [ ] **Device Selection:** Select a Loopback device, start recording, verify audio comes from that device (not the default). Then quit Loopback mid-recording and verify graceful fallback.
+- [ ] **Device Persistence:** Select a device, restart the app, verify the same device is still selected (UID lookup succeeds).
+- [ ] **Sign Out:** Use the Sign Out button, verify Keychain tokens are deleted, Google token is revoked, and calendar data is cleared.
+- [ ] **Offline Behavior:** Disconnect network, verify app does not crash, cached calendar data is used, and a clear "offline" indicator is shown.
+- [ ] **Privacy Policy:** Visit the privacy policy URL from the consent screen and verify it loads correctly and describes calendar data handling.
+- [ ] **Duplicate Detection:** Enable both EventKit and Google Calendar for the same Google account, verify meetings are not duplicated in Caddie's list.
+
+---
 
 ## Sources
 
-- [Apple: Capturing system audio with Core Audio taps](https://developer.apple.com/documentation/CoreAudio/capturing-system-audio-with-core-audio-taps) -- official process tap documentation
-- [Why CoreAudio is Hard (Mike Ash)](https://www.mikeash.com/pyblog/why-coreaudio-is-hard.html) -- render callback constraints, real-time thread rules
-- [Hacking with Swift: Actor Reentrancy](https://www.hackingwithswift.com/quick-start/concurrency/what-is-actor-reentrancy-and-how-can-it-cause-problems) -- reentrancy semantics and pitfalls
-- [Swift Senpai: Actor Reentrancy Problem](https://swiftsenpai.com/swift/actor-reentrancy-problem/) -- detailed reentrancy examples
-- [SQLite FTS5 documentation](https://www.sqlite.org/fts5.html) -- content-sync table rules, rebuild command
-- [SQLite Forum: FTS5 corruption from triggers](https://sqlite.org/forum/info/da59bf102d7a7951740bd01c4942b1119512a86bfa1b11d4f762056c8eb7fc4e) -- trigger ordering matters
-- [GRDB.swift GitHub](https://github.com/groue/GRDB.swift) -- WAL mode, DatabasePool concurrent access patterns
-- [Stripe: SPM build fails with undefined __llvm_profile_runtime](https://github.com/stripe/stripe-ios/issues/1651) -- code coverage + C target linker issue
-- [Real-time audio programming 101 (Ross Bencina)](http://www.rossbencina.com/code/real-time-audio-programming-101-time-waits-for-nothing) -- lock-free patterns for audio
-- [TPCircularBuffer (A Tasty Pixel)](https://atastypixel.com/a-simple-fast-circular-buffer-implementation-for-audio-processing/) -- canonical lock-free ring buffer for CoreAudio
-- [Apple Forums: CoreAudio crashes on macOS Sonoma](https://discussions.apple.com/thread/255788454) -- aggregate device issues
-- [Apple Support: Screen & System Audio Recording permission](https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/mac) -- permission model for taps
-- [Creating files safely in Mac apps (Wade Tregaskis)](https://wadetregaskis.com/creating-temporary-files-safely-in-mac-apps/) -- temp file handling patterns
-- [Swift Forums: Realtime threads with Swift](https://forums.swift.org/t/realtime-threads-with-swift/40562) -- Swift memory model incompatibility with real-time audio
+- [Google OAuth 2.0 for Desktop Apps](https://developers.google.com/identity/protocols/oauth2/native-app) -- loopback redirect, PKCE requirements, token refresh
+- [Google Loopback IP Address Migration Guide](https://developers.google.com/identity/protocols/oauth2/resources/loopback-migration) -- deprecation status of loopback redirects
+- [Google Calendar API Sync Guide](https://developers.google.com/workspace/calendar/api/guides/sync) -- sync tokens, 410 handling, incremental sync
+- [Google Calendar API Quota Management](https://developers.google.com/workspace/calendar/api/guides/quota) -- per-minute limits, exponential backoff
+- [Google Sensitive Scope Verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification) -- verification process, timeline, requirements
+- [Google OAuth App Verification: Costs, Timelines](https://www.nylas.com/blog/google-oauth-app-verification/) -- practical verification timeline experience
+- [Apple: Storing Keys in the Keychain](https://developer.apple.com/documentation/security/certificate_key_and_trust_services/keys/storing_keys_in_the_keychain) -- Keychain best practices
+- [Square Valet (Keychain wrapper)](https://github.com/square/Valet) -- Keychain patterns for macOS
+- [AppAuth-iOS (OpenID Foundation)](https://github.com/openid/AppAuth-iOS) -- OAuth2 for macOS, loopback server implementation
+- [AudioKit #2130: AVAudioEngine device selection limitations](https://github.com/AudioKit/AudioKit/issues/2130) -- AVAudioEngine cannot select non-default device
+- [Apple Forums: Select audio device for AVAudioEngine](https://developer.apple.com/forums/thread/71008) -- confirmed limitation
+- [Rogue Amoeba: Loopback audio capture details on macOS 14+](https://rogueamoeba.com/support/knowledgebase/?showArticle=Misc-ARK-Plugin-Audio-Capture-Details&product=Loopback) -- virtual device behavior on Sonoma+
+- [Rogue Amoeba: ACE component repair](https://rogueamoeba.com/support/knowledgebase/?showArticle=ACE-Repair&product=Loopback) -- virtual device disappearance
+- [Virtual audio routing on macOS isn't lossless](https://blog.claranguyen.me/post/2025/03/09/lossless-loopback-audio-macos/) -- sample rate quirks
+- [SimplyCoreAudio](https://github.com/rnine/SimplyCoreAudio) -- device change notifications, hot-plug handling
+- [OAuth2 token refresh race condition (GitHub)](https://github.com/thephpleague/oauth2-client/issues/593) -- documented race condition
+- [Google OAuth invalid_grant explanation (Nango)](https://nango.dev/blog/google-oauth-invalid-grant-token-has-been-expired-or-revoked) -- token revocation scenarios
+- [How to Fix Expired Token Errors in OAuth2](https://oneuptime.com/blog/post/2026-01-24-oauth2-expired-token-errors/view) -- retry and refresh patterns
+- [JUCE Forum: CoreAudio deadlock on stop/restart](https://forum.juce.com/t/coreaudio-deadlock-when-stopping-and-restarting-device/51882) -- device lifecycle issues
 
 ---
-*Pitfalls research for: macOS native audio/ML app hardening*
-*Researched: 2026-03-22*
+*Pitfalls research for: Google Calendar OAuth2 + audio device selection (Caddie v2.0)*
+*Researched: 2026-03-24*

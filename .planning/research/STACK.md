@@ -1,163 +1,193 @@
-# Stack Research: Production Hardening
+# Technology Stack
 
-**Domain:** macOS native app hardening (CoreAudio + on-device ML pipeline)
-**Researched:** 2026-03-22
-**Confidence:** MEDIUM-HIGH
+**Project:** Caddie v2.0 -- Google Calendar + Audio Device Selection
+**Researched:** 2026-03-24
+**Scope:** NEW dependencies only. Existing stack (Swift 6.0, SwiftUI, GRDB, FluidAudio, SimplyCoreAudio, etc.) is validated and unchanged.
 
-This is NOT a greenfield stack recommendation. The core stack (Swift/SwiftUI/GRDB/FluidAudio/CoreAudio) is already shipped. This research covers the tooling, patterns, and configuration changes needed to harden the existing app for production reliability.
+## Recommended Stack Additions
 
-## Recommended Stack Changes
+### Google OAuth2
 
-### Testing Infrastructure
+| Technology | Version | Purpose | Why |
+|------------|---------|---------|-----|
+| ASWebAuthenticationSession (AuthenticationServices) | System framework | OAuth2 login flow | Apple's first-party, secure browser-based auth. Already ships with macOS 14.2+. No third-party dependency needed. Handles the browser popup, redirect capture, and session cleanup. |
+| URLSession (Foundation) | System framework | Google Calendar REST API calls + token exchange | The Calendar API is a simple REST API with JSON responses. 3 endpoints needed (events.list, token exchange, token refresh). A dedicated Google API client library is massive overkill for read-only calendar access. |
+| Security (Keychain) | System framework | Store OAuth2 refresh token | SecItemAdd/SecItemCopyMatching for persisting the refresh token. Native macOS Keychain is the correct place for credentials. No wrapper library needed -- the API surface is small (add, query, update, delete). |
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| Swift Testing | Built-in (Xcode 16+) | Unit test framework | Parallel by default, native async/await support, parameterized tests via `@Test` macro. XCTest lacks built-in parameterization and requires `XCTestExpectation` boilerplate for async tests. Use Swift Testing for all new tests, keep XCTest only for existing tests that work. |
-| XcodeGen `coverageTargets` | 2.42+ | Selective code coverage | Solves the yyjson linker crash. Set `coverageTargets: [Caddie]` to exclude FluidAudio's C dependency (yyjson) from coverage instrumentation. Without this, `CLANG_ENABLE_CODE_COVERAGE` causes `___llvm_profile_runtime` undefined symbol errors in C targets. |
-| GRDB in-memory testing | 7.10.0 (current) | Migration and DB testing | Already have `init(inMemory:)` in Database.swift. Use `DatabaseQueue()` for isolated test databases. GRDB's `DatabaseMigrator` supports `migrate(upTo:)` for version-specific migration testing. |
+### Google Calendar API
 
-### Concurrency Hardening
+| Technology | Version | Purpose | Why |
+|------------|---------|---------|-----|
+| Google Calendar API v3 (REST) | v3 | Read upcoming meetings | Direct HTTP calls via URLSession. Endpoint: `GET /calendar/v3/calendars/primary/events`. Only read-only access needed. Scope: `calendar.events.readonly`. |
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| Swift 6.1+ strict concurrency | Xcode 16.3+ | Compile-time data race detection | Enable `-strict-concurrency=complete` build setting. The TranscriptionPipeline is already an actor but AppState is `@Observable final class` with `[weak self]` closures crossing isolation boundaries. Strict concurrency will surface these at compile time. |
-| `withTaskCancellationHandler` | Swift stdlib | Cooperative cancellation for ML pipeline | The transcription pipeline has no cancellation support. Long-running ASR/diarization tasks (minutes) should check `Task.isCancelled` between steps and use `withTaskCancellationHandler` to propagate cancellation to the underlying FluidAudio operations. |
-| `withThrowingTaskGroup` timeout | Swift stdlib | Model download timeout | Replace unbounded `await modelManager.downloadModelsIfNeeded()` with a task group race pattern: one task does the download, another sleeps for 300s and throws `TimeoutError`. First completion wins, `group.cancelAll()` cleans up the loser. |
+### Audio Device Selection
 
-### Error Handling & Logging
+| Technology | Version | Purpose | Why |
+|------------|---------|---------|-----|
+| SimplyCoreAudio | 4.x (existing) | Enumerate audio input devices | Already a dependency. Provides `allInputDevices`, device name, UID, manufacturer. Also provides `.deviceListDidChange` notification for hot-plug detection. Even though archived (Mar 2024), it works on macOS 14.2+ and the underlying CoreAudio APIs it wraps are stable. |
+| CoreAudio | System framework | Set capture device on AudioUnit | Already used by SystemAudioCapture. Device selection means passing a different `AudioDeviceID` to `kAudioOutputUnitProperty_CurrentDevice` instead of the aggregate device. |
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| `os.Logger` (already in use) | macOS 14+ | Structured logging | Already set up in CaddieLogger.swift with subsystem/category. The issue is not the logger itself but the 14 `try?` call sites that suppress errors without logging. Every `try?` should become `do/catch` with a `logger.warning()` or `logger.error()`. No new library needed. |
-| Custom `OSStatus` extension | N/A | CoreAudio error translation | Add a `fourCharCode` extension on `OSStatus` to translate numeric error codes to human-readable strings (e.g., `1852797029` -> `'kAHD'`). CoreAudio returns opaque OSStatus codes that are useless without translation. |
+### Pre-Meeting Notifications
 
-### Data Integrity
+| Technology | Version | Purpose | Why |
+|------------|---------|---------|-----|
+| UserNotifications (UNUserNotificationCenter) | System framework | Schedule "Recording starts in 2 min" alerts | Apple's standard local notification API. Works on macOS 14.2+. Supports time-interval triggers, actionable notifications, and respects Do Not Disturb. No library needed. |
 
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| GRDB 7.10.0 | 7.10.0 | Already in use | Pinned at 7.10.0 which is current as of Feb 2026. Requires Swift 6.1+/Xcode 16.3+. Includes FTS5 cancellation fix. No version bump needed. |
-| `URLResourceValues.volumeAvailableCapacityForImportantUsage` | Foundation (macOS 14+) | Disk space checking | Apple's recommended API for checking available storage. Returns `Int64?` of bytes available for "important" usage (accounts for purgeable space). Use before recording starts and before ALAC compression. No external dependency needed. |
-| GRDB `DatabaseMigrator.eraseDatabaseOnSchemaChange` | 7.10.0 | Dev-only migration reset | Wrap in `#if DEBUG` to auto-recreate DB when migrations change during development. Must NOT ship in release builds. |
+## What NOT to Add
 
-### CoreAudio Resilience
-
-| Technology | Version | Purpose | Why Recommended |
-|------------|---------|---------|-----------------|
-| `AudioObjectAddPropertyListenerBlock` | CoreAudio (macOS 14+) | Device change monitoring | Register for `kAudioHardwarePropertyDevices` changes to detect when the tapped process's audio device disappears mid-recording. SimplyCoreAudio wraps this via `deviceListChanged` notification, which is already a dependency. |
-| Aggregate device UID tracking | N/A (pattern, not library) | Cleanup on crash recovery | Store the aggregate device UID in UserDefaults. On app launch, check if a stale aggregate device exists and destroy it. Error code `1852797029` from `AudioHardwareCreateAggregateDevice` means a device with that UID already exists. |
-
-## Supporting Libraries (No Changes)
-
-These are already correct and should stay:
-
-| Library | Version | Purpose | Status |
-|---------|---------|---------|--------|
-| GRDB | 7.10.0 | SQLite with WAL, FTS5, migrations | Keep. Current version. |
-| FluidAudio | 0.12.4 | ASR (Parakeet) + diarization (Sortformer) | Keep. ML backbone. |
-| SimplyCoreAudio | 4.1.1 | Microphone capture | Keep. Also useful for device change notifications. |
-| AXSwift | 0.3.2 | Window title monitoring | Keep. Stable. |
-| Sparkle | 2.9.0 | Auto-updates | Keep. Standard for non-App Store macOS distribution. |
-
-## Build System Configuration Changes
-
-### XcodeGen project.yml changes needed:
-
-```yaml
-# Fix: Test target code coverage (solves yyjson linker crash)
-schemes:
-  CaddieTests:
-    build:
-      targets:
-        Caddie: [test]
-    test:
-      gatherCoverageData: true
-      coverageTargets:
-        - Caddie  # Only instrument the app target, not SPM C dependencies
-      targets:
-        - CaddieTests
-
-# Fix: Enable strict concurrency checking
-settings:
-  base:
-    SWIFT_STRICT_CONCURRENCY: complete  # or 'targeted' as stepping stone
-```
-
-### Alternative: If XcodeGen scheme-level coverage doesn't resolve the yyjson issue
-
-The root cause is `CLANG_ENABLE_CODE_COVERAGE=YES` being applied to the yyjson C target. If `coverageTargets` doesn't prevent this (XcodeGen applies coverage at scheme level, not build-setting level), the fallback is:
-
-```yaml
-# In the test target settings:
-CaddieTests:
-  settings:
-    base:
-      CLANG_ENABLE_CODE_COVERAGE: NO  # Disable Clang coverage, keep Swift coverage
-```
-
-This disables C-level coverage instrumentation while Swift coverage still works through the Swift compiler's own profiling.
+| Library | Why Not |
+|---------|---------|
+| **AppAuth-iOS** (openid/AppAuth-iOS v2.0.0) | Adds OAuth2 framework + OIDC discovery + session management for a flow that is ~150 lines of code with ASWebAuthenticationSession. Google's OAuth2 for desktop apps is well-documented with exact endpoints. AppAuth brings Objective-C bridging headers and complexity we don't need. |
+| **google-api-swift-client** (googleapis) | Archived Jan 2026. Was experimental, never reached 1.0. Dead project. |
+| **GoogleAPIClientForREST** (Obj-C) | Massive Objective-C library that generates typed clients for ALL Google APIs. We need exactly one endpoint (`events.list`). The JSON response is simple enough to decode with `Codable`. This library would be the single largest dependency in the app. |
+| **GTMAppAuth** (google/GTMAppAuth) | Companion to GoogleAPIClientForREST. Same problem -- heavy Objective-C dependency for a simple OAuth flow. |
+| **OAuthSwift** | Third-party OAuth library. ASWebAuthenticationSession is Apple's blessed solution and already handles the hard parts (secure browser, session isolation). Adding OAuthSwift just to avoid writing ~100 lines of token exchange code is not worth the dependency. |
+| **p2/OAuth2** | Another OAuth framework. Same reasoning as OAuthSwift -- we don't need a framework for a single-provider, single-scope OAuth flow. |
+| **KeychainAccess / SwiftKeychainWrapper** | Keychain wrapper libraries. The raw Security framework API for storing one refresh token is ~30 lines. A wrapper library for that is unnecessary. |
+| **Any new CoreAudio wrapper** | SimplyCoreAudio is archived but stable. The CoreAudio APIs it wraps haven't changed. Switching to a different wrapper introduces risk for no benefit. If SimplyCoreAudio breaks in a future macOS, we can fork or drop to raw CoreAudio (which SystemAudioCapture already uses directly). |
 
 ## Alternatives Considered
 
-| Recommended | Alternative | Why Not |
-|-------------|-------------|---------|
-| Swift Testing | XCTest only | XCTest works but lacks parameterized tests, requires XCTestExpectation for async, runs tests serially by default. Swift Testing is Apple's direction. |
-| `os.Logger` (keep) | SwiftyBeaver, CocoaLumberjack | External logging libraries add dependency for something Apple's framework handles well. `os.Logger` integrates with Console.app and Xcode console filtering. The app already uses it. |
-| GRDB (keep) | SwiftData | SwiftData lacks FTS5 support, migration control, and raw SQL escape hatches. GRDB is the right choice for a data-intensive app with custom schema. |
-| `URLResourceValues` disk check | `FileManager.attributesOfFileSystem` | `attributesOfFileSystem` returns raw free space without accounting for purgeable storage. Apple recommends `volumeAvailableCapacityForImportantUsage` for accurate estimates. |
-| `withThrowingTaskGroup` timeout | `DispatchWorkItem` + timer | Mixing GCD with structured concurrency creates cancellation leaks. Stay within Swift Concurrency for timeouts. |
-| Strict concurrency (`complete`) | `targeted` mode | `targeted` only checks code you've explicitly annotated. `complete` catches all violations. Since we're hardening, catch everything. Start with `targeted` if `complete` produces too many warnings. |
+| Category | Recommended | Alternative | Why Not |
+|----------|-------------|-------------|---------|
+| OAuth2 flow | ASWebAuthenticationSession + URLSession | AppAuth-iOS v2.0.0 | AppAuth adds Obj-C bridging, OIDC discovery we don't need, and complexity for a single-provider flow. ASWebAuthenticationSession + manual token exchange is simpler, testable, and dependency-free. |
+| Calendar API client | Direct URLSession + Codable | GoogleAPIClientForREST | One endpoint needed. Obj-C library is 10x heavier than needed. Direct REST is more maintainable and lets us control retry/error handling. |
+| Token storage | Security framework (Keychain) | UserDefaults | Never store OAuth tokens in UserDefaults. Keychain provides encryption at rest and proper access control. |
+| Device enumeration | SimplyCoreAudio (existing) | Raw CoreAudio APIs | Already a dependency, already used by MicStateMonitor. Provides clean Swift API for device listing and change notifications. |
+| Notifications | UNUserNotificationCenter | NSUserNotification (deprecated) | UNUserNotificationCenter is the modern API. NSUserNotification was deprecated in macOS 11. |
 
-## What NOT to Use
+## OAuth2 Flow Design
 
-| Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| `DispatchQueue` / GCD for new async work | Mixing GCD with Swift Concurrency actors causes subtle data race bugs. The TranscriptionPipeline is an actor; CalendarMonitor uses `DispatchQueue.main.async`. These should not be mixed in new code. | `Task { @MainActor in ... }` for main-thread work. Actor isolation for serialization. |
-| `try?` without logging | 14 instances currently suppress errors silently. This directly violates the core value of "no silent failures." Every `try?` is a potential lost recording or corrupted state. | `do { try ... } catch { logger.warning(...) }` or `do { try ... } catch { throw PipelineError.wrapping(error) }` for critical paths. |
-| `Unmanaged.passUnretained(self)` without safety net | Used in SystemAudioCapture.swift:287 for the render callback. If `self` is deallocated while the audio unit is running, this is a use-after-free crash on the real-time audio thread. | Set `onBuffer = nil` and stop the audio unit BEFORE releasing the SystemAudioCapture instance. The `deinit` calls `stop()` but verify stop completes synchronously. |
-| Global mutable state for audio device IDs | `aggregateDeviceID` and `tapObjectID` are instance vars on a non-Sendable class accessed from the render callback thread. | Keep current pattern (the render callback only reads `audioUnit` and `onBuffer`), but ensure `stop()` is called from the same thread or add `@unchecked Sendable` with a documented safety argument. |
-| `precondition` in production database init | `Database.swift:28` uses `precondition(inMemory)` which will crash in release builds if called wrong. | Use `assert` (debug-only) or throw an error. Precondition is appropriate here since it's an API contract, but flag it in code review. |
+**Client type:** Desktop application (Google Cloud Console)
+**Redirect method:** Custom URI scheme (`com.caddie.app:/oauth2redirect`) via ASWebAuthenticationSession
+**Why custom scheme over loopback:** ASWebAuthenticationSession natively supports custom URI schemes. No need to spin up a local HTTP server. Simpler, fewer moving parts. Google supports custom URI schemes for desktop apps. For Google specifically, the custom scheme is the reversed client ID (e.g., `com.googleusercontent.apps.CLIENT_ID:/oauth2redirect/google`).
 
-## Swift 6.2 Consideration
+**Flow:**
+1. Generate PKCE code_verifier (43-128 char random string) + code_challenge (Base64URL-encoded SHA256)
+2. Open ASWebAuthenticationSession with Google's auth URL + PKCE params + scope
+3. User authenticates in system browser
+4. Redirect captured by ASWebAuthenticationSession with auth code
+5. Exchange auth code + code_verifier for access_token + refresh_token via URLSession POST
+6. Store refresh_token in Keychain (SecItemAdd with kSecClassGenericPassword)
+7. Use access_token for API calls; refresh when expired (HTTP 401 or proactive expiry check)
 
-Swift 6.2 (Xcode 17, expected mid-2026) introduces `@concurrent` and `defaultIsolation(MainActor.self)`. Key implications:
+**Endpoints:**
+- Authorization: `https://accounts.google.com/o/oauth2/v2/auth`
+- Token exchange: `https://oauth2.googleapis.com/token`
+- Token refresh: `https://oauth2.googleapis.com/token` (with `grant_type=refresh_token`)
+- Events list: `GET https://www.googleapis.com/calendar/v3/calendars/primary/events`
 
-- **`@concurrent`**: Marks functions that explicitly run off-actor. Nonisolated async functions will run on the caller's actor by default (behavior change from Swift 6.1).
-- **`defaultIsolation MainActor`**: New projects default to MainActor isolation. Existing projects opt in. This would eliminate many of the `[weak self]` + `DispatchQueue.main.async` patterns in AppState.
-- **Recommendation**: Do NOT adopt Swift 6.2 features yet. The hardening milestone should target Swift 6.1 with `strict-concurrency=complete`. Migrate to 6.2 patterns in a subsequent milestone once the concurrency model is clean.
+**Scope:** `https://www.googleapis.com/auth/calendar.events.readonly` (minimum required for listing events with attendees)
 
-## Version Compatibility
+**Token lifecycle:**
+- Access tokens expire after ~1 hour
+- Refresh tokens are long-lived (persist across app restarts via Keychain)
+- On HTTP 401: use refresh token to get new access token, retry request
+- On refresh failure (revoked access): clear Keychain, prompt re-auth
 
-| Component | Requires | Notes |
-|-----------|----------|-------|
-| GRDB 7.10.0 | Swift 6.1+, Xcode 16.3+, macOS 10.15+ | Currently using Swift 5.9. GRDB 7.10 bumped its minimum to Swift 6.1. Verify the project builds with Xcode 16.3+ or pin to GRDB 7.9.0 (which supports Swift 5.9). |
-| Swift Testing | Xcode 16+, macOS 13+ | Ships with Xcode, no SPM dependency needed. Import `Testing` instead of `XCTest`. |
-| `coverageTargets` | XcodeGen 2.38+ | Available since PR #700 merged. Verify installed XcodeGen version with `xcodegen version`. |
-| macOS 14.2 deployment target | Xcode 15+ | Already set. CATapDescription API requires macOS 14.2+. |
-| FluidAudio 0.12.4 | yyjson 0.12.0 (transitive) | The C dependency causing test linker issues. Cannot be removed, must be excluded from coverage. |
+## Google Calendar API Usage
 
-**CRITICAL COMPATIBILITY NOTE**: GRDB 7.10.0 requires Swift 6.1+, but project.yml specifies `SWIFT_VERSION: "5.9"`. Either:
-1. Update `SWIFT_VERSION` to `"6.0"` or `"6.1"` (recommended -- enables strict concurrency)
-2. Pin GRDB to `~> 7.8.0` which supports Swift 5.9
+**Polling strategy:** Poll every 60 seconds for events in a window of [now - 5min, now + 30min]. This catches:
+- Meetings starting soon (pre-meeting notification at T-2min)
+- Meetings currently happening (auto-start recording)
+- Recently ended meetings (grace period before stopping)
 
-Option 1 is strongly recommended since strict concurrency checking is a core goal of this hardening milestone.
+**Key parameters:**
+```
+timeMin: ISO 8601 (now - 5 min)
+timeMax: ISO 8601 (now + 30 min)
+singleEvents: true (expand recurring events)
+orderBy: startTime
+maxResults: 10
+```
+
+**Response decoding:** Standard `Codable` structs for the Calendar Event JSON. Key fields: `summary`, `start.dateTime`, `end.dateTime`, `attendees[].email`, `status`, `conferenceData`.
+
+## Audio Device Selection Design
+
+**Current state:** SystemAudioCapture creates a process tap + aggregate device. MicrophoneCapture uses `AVAudioEngine.inputNode` which always uses the system default input device.
+
+**What changes for device selection:**
+1. New `AudioDeviceManager` class wrapping SimplyCoreAudio for device enumeration
+2. `MicrophoneCapture` needs a method to target a specific input device (not just default)
+3. `AudioRecorder.start()` gets an optional `inputDeviceID: AudioDeviceID?` parameter
+4. Settings UI gets a device picker dropdown
+5. Selected device UID stored in UserDefaults (survives app restart, UID is stable across reboots)
+
+**Device enumeration API (SimplyCoreAudio, already available):**
+```swift
+let sca = SimplyCoreAudio()
+let inputDevices = sca.allInputDevices  // includes virtual devices like Loopback
+// Each device has: .name, .uid, .manufacturer, .id (AudioDeviceID)
+```
+
+**Hot-plug detection (SimplyCoreAudio, already available):**
+```swift
+NotificationCenter.default.addObserver(forName: .deviceListDidChange, ...)
+```
+
+**Setting a specific input device on AVAudioEngine:**
+```swift
+// Get the AudioDeviceID for the selected device
+let deviceID: AudioDeviceID = selectedDevice.id
+var id = deviceID
+// Set on the AVAudioEngine's inputNode
+AudioUnitSetProperty(
+    engine.inputNode.audioUnit!,
+    kAudioOutputUnitProperty_CurrentDevice,
+    kAudioUnitScope_Global, 0,
+    &id, UInt32(MemoryLayout<AudioDeviceID>.size)
+)
+```
+
+## Entitlements Changes
+
+**Current entitlements:**
+- `com.apple.security.device.audio-input` (microphone)
+- `com.apple.security.personal-information.calendars` (EventKit)
+
+**New entitlements needed:** None. The app is not sandboxed (no `com.apple.security.app-sandbox`), so outgoing network connections for Google Calendar API work without additional entitlements.
+
+**Info.plist additions:**
+- `CFBundleURLTypes` with URL scheme for OAuth redirect (reversed client ID from Google Cloud Console)
+
+## Installation
+
+**No new SPM packages needed.** All new capabilities use system frameworks:
+
+```
+AuthenticationServices  -- ASWebAuthenticationSession (OAuth2 login)
+Security               -- Keychain (token storage)
+UserNotifications      -- UNUserNotificationCenter (pre-meeting alerts)
+Foundation/URLSession  -- Google Calendar REST API calls
+```
+
+Existing dependency SimplyCoreAudio already provides device enumeration.
+
+**project.yml changes:** None for dependencies. Only Info.plist and potentially entitlements need updating.
+
+## Confidence Assessment
+
+| Area | Confidence | Reason |
+|------|------------|--------|
+| OAuth2 flow (ASWebAuthenticationSession + PKCE) | HIGH | Apple first-party API, Google officially documents this flow for desktop apps, multiple verified examples |
+| Google Calendar REST API | HIGH | Official Google docs, well-documented REST endpoints, standard Codable decoding |
+| Keychain token storage | HIGH | Standard macOS pattern, Security framework is stable |
+| Audio device enumeration (SimplyCoreAudio) | HIGH | Already in use in MicStateMonitor, device listing API is straightforward |
+| Setting specific input device on AVAudioEngine | MEDIUM | CoreAudio API is documented but setting input device on AVAudioEngine.inputNode requires AudioUnit-level property manipulation. Needs testing with Loopback virtual device specifically. |
+| UNUserNotificationCenter for pre-meeting | HIGH | Standard macOS notification API, well-documented |
+| Zero new dependencies needed | MEDIUM | Validated that direct URLSession works for Calendar API. Token refresh edge cases (revocation, network errors) may surface complexity but not library-level complexity. |
 
 ## Sources
 
-- [Apple Developer: Capturing system audio with Core Audio taps](https://developer.apple.com/documentation/coreaudio/capturing-system-audio-with-core-audio-taps) -- CoreAudio tap patterns
-- [CoreAudio Tap reference implementation by sudara](https://gist.github.com/sudara/34f00efad69a7e8ceafa078ea0f76f6f) -- Error handling, aggregate device gotchas
-- [GRDB.swift GitHub](https://github.com/groue/GRDB.swift) -- v7.10.0 release, migration testing, Swift 6.1 requirement
-- [GRDB migration testing issue #648](https://github.com/groue/GRDB.swift/issues/648) -- In-memory DB testing patterns, snapshot approach
-- [Swift SR-14788: Linker error with code coverage on C/ObjC packages](https://github.com/apple/swift/issues/57137) -- Root cause of yyjson linker issue
-- [XcodeGen coverageTargets PR #700](https://github.com/yonaskolb/XcodeGen/pull/700) -- onlyGenerateCoverageForSpecifiedTargets
-- [XcodeGen ProjectSpec docs](https://github.com/yonaskolb/XcodeGen/blob/master/Docs/ProjectSpec.md) -- coverageTargets YAML syntax
-- [Swift 6.2 concurrency changes](https://www.donnywals.com/exploring-concurrency-changes-in-swift-6-2/) -- @concurrent, defaultIsolation
-- [Apple Developer: volumeAvailableCapacityForImportantUsage](https://developer.apple.com/documentation/foundation/urlresourcevalues/volumeavailablecapacityforimportantusage) -- Disk space API
-- [Donnywals: Task timeout with Swift Concurrency](https://www.donnywals.com/implementing-task-timeout-with-swift-concurrency/) -- withThrowingTaskGroup timeout pattern
-- [HackingWithSwift: Actor reentrancy](https://www.hackingwithswift.com/quick-start/concurrency/what-is-actor-reentrancy-and-how-can-it-cause-problems) -- Reentrancy patterns
-- [SwiftLee: os.Logger unified logging](https://www.avanderlee.com/debugging/oslog-unified-logging/) -- Structured logging best practices
-- [Swift Testing vs XCTest](https://blog.micoach.itj.com/swift-testing-vs-xctest) -- Framework comparison
-- [SwiftwithMajid: Task cancellation](https://swiftwithmajid.com/2025/02/11/task-cancellation-in-swift-concurrency/) -- Cooperative cancellation patterns
-
----
-*Stack research for: macOS app production hardening (CoreAudio + on-device ML)*
-*Researched: 2026-03-22*
+- [Google OAuth2 for Desktop Apps](https://developers.google.com/identity/protocols/oauth2/native-app) -- Official flow documentation, endpoints, PKCE parameters
+- [Google Calendar Events.list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list) -- REST endpoint, parameters, response format
+- [Google Calendar API Scopes](https://developers.google.com/workspace/calendar/api/auth) -- `calendar.events.readonly` is minimum scope
+- [Loopback Migration Guide](https://developers.google.com/identity/protocols/oauth2/resources/loopback-migration) -- Confirms loopback NOT deprecated for desktop apps
+- [ASWebAuthenticationSession](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession) -- Apple docs
+- [AppAuth-iOS v2.0.0](https://github.com/openid/AppAuth-iOS/releases) -- Evaluated and rejected (too heavy for single-provider flow)
+- [google-api-swift-client](https://github.com/googleapis/google-api-swift-client) -- Archived Jan 2026, experimental, do not use
+- [GoogleAPIClientForREST](https://swiftpackageindex.com/google/google-api-objectivec-client-for-rest) -- Evaluated and rejected (massive Obj-C library for one endpoint)
+- [SimplyCoreAudio](https://github.com/rnine/SimplyCoreAudio) -- Archived Mar 2024, v4.1.1, but stable and already in use
+- [UNUserNotificationCenter](https://developer.apple.com/documentation/usernotifications/unusernotificationcenter) -- Apple docs for local notifications
+- [CoreAudio Device Enumeration Gist](https://gist.github.com/SteveTrewick/c0668ee438eb784cbc5fb4674f0c2cd1) -- Swift device listing patterns

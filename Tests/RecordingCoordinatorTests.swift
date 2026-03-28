@@ -288,6 +288,59 @@ final class RecordingCoordinatorTests: XCTestCase {
         XCTAssertTrue(description.contains("500"), "Error should mention required MB, got: \(description)")
     }
 
+    // MARK: - AudioDeviceManager Integration
+
+    func testCoordinatorAcceptsAudioDeviceManager() async {
+        let coordinator = RecordingCoordinator(
+            database: db,
+            recorder: AudioRecorder(),
+            pipeline: pipeline,
+            detector: MeetingDetector(),
+            audioDeviceManager: nil
+        )
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+    }
+
+    func testCoordinatorDefaultInitStillCompiles() async {
+        // Verify existing makeCoordinator() helper (without audioDeviceManager) still works
+        let coordinator = makeCoordinator()
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+    }
+
+    // MARK: - Manual Recording
+
+    func testStartManualRecordingTransitionsToRecording() async {
+        let coordinator = makeCoordinator()
+        await coordinator.startManualRecording()
+
+        let state = await coordinator.state
+        guard case .recording = state else {
+            XCTFail("Expected .recording state, got \(state)")
+            return
+        }
+    }
+
+    func testStartManualRecordingCreatesDatabaseRecord() async throws {
+        let coordinator = makeCoordinator()
+        await coordinator.startManualRecording()
+
+        let state = await coordinator.state
+        guard case .recording(let meetingId) = state else {
+            XCTFail("Expected .recording state")
+            return
+        }
+
+        let meeting = try await db.dbWriter.read { dbConn in
+            try Meeting.filter(Column("meeting_id") == meetingId).fetchOne(dbConn)
+        }
+        XCTAssertNotNil(meeting)
+        XCTAssertEqual(meeting?.title, "Manual Recording")
+        XCTAssertEqual(meeting?.app, "Manual")
+        XCTAssertEqual(meeting?.status, .recording)
+    }
+
     // MARK: - Convenience Methods (Existing)
 
     func testStopRecordingForwardsEvent() async throws {

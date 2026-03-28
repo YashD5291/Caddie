@@ -28,6 +28,11 @@ struct MenuBarView: View {
         switch appState.status {
         case .idle:
             Text("No Active Meeting")
+            Button {
+                appState.startManualRecording()
+            } label: {
+                Label("Start Recording", systemImage: "record.circle")
+            }
 
         case .recording:
             Text("\u{1F534} \(appState.currentMeetingTitle ?? "Recording...")")

@@ -39,7 +39,10 @@ final class AppState {
 
     private(set) var database: AppDatabase?
     private(set) var modelManager = ModelManager()
+    private(set) var audioDeviceManager = AudioDeviceManager()
+    private(set) var authManager = GoogleAuthManager()
     private(set) var coordinator: RecordingCoordinator?
+    var googleAuthState: GoogleAuthManager.AuthState = .signedOut
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AppState")
 
@@ -51,10 +54,15 @@ final class AppState {
     func initialize() async {
         guard !isInitialized else { return }
         do {
+            // Restore Google auth session from Keychain (AUTH-01)
+            await authManager.restoreSession()
+            googleAuthState = await authManager.state
+
             database = try AppDatabase()
             try AudioFileManager.ensureDirectoryExists()
             AudioFileManager.cleanupOrphanedTempFiles() // DATA-05
             SystemAudioCapture.cleanupStaleAggregateDevices() // REC-06
+            audioDeviceManager.initialize() // AUD-01/AUD-02: enumerate devices and load persisted selection
 
             // 1. Load models from app bundle (D-04: bundle-based, no network)
             await modelManager.loadModelsFromBundle()
@@ -86,11 +94,13 @@ final class AppState {
 
             // 5. Create coordinator with all dependencies -- eliminates init race (REC-04)
             // All deps are non-optional: coordinator cannot exist without a working pipeline
+            let deviceManager = audioDeviceManager
             let newCoordinator = RecordingCoordinator(
                 database: database!,
                 recorder: AudioRecorder(),
                 pipeline: pipeline,
-                detector: MeetingDetector()
+                detector: MeetingDetector(),
+                audioDeviceManager: deviceManager
             )
 
             // 6. Wire coordinator state changes to observable properties
@@ -148,12 +158,40 @@ final class AppState {
 
     // MARK: - UI Actions (delegate to coordinator)
 
+    func startManualRecording() {
+        currentMeetingTitle = "Manual Recording"
+        Task { await coordinator?.startManualRecording() }
+    }
+
+    func stopManualRecording() {
+        Task { await coordinator?.stopManualRecording() }
+    }
+
     func stopRecording() {
         Task { await coordinator?.stopRecording() }
     }
 
     func retryTranscription(meetingId: String) {
         Task { await coordinator?.retryTranscription(meetingId: meetingId) }
+    }
+
+    func signInToGoogle(window: NSWindow) {
+        Task {
+            do {
+                try await authManager.signIn(presenting: window)
+                googleAuthState = await authManager.state
+            } catch {
+                CaddieLogger.auth.error("Google sign-in failed: \(error.localizedDescription)")
+                googleAuthState = await authManager.state
+            }
+        }
+    }
+
+    func signOutFromGoogle() {
+        Task {
+            await authManager.signOut()
+            googleAuthState = await authManager.state
+        }
     }
 
     func shutdown() {

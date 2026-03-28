@@ -9,6 +9,7 @@ enum CaddieLogger {
     static let recording = Logger(subsystem: subsystem, category: "Recording")
     static let transcription = Logger(subsystem: subsystem, category: "Transcription")
     static let storage = Logger(subsystem: subsystem, category: "Storage")
+    static let auth = Logger(subsystem: subsystem, category: "Auth")
 
     /// Opens ~/Library/Logs/Caddie/ in Finder, creating it if needed.
     static func showLogs() {

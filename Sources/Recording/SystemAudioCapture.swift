@@ -3,15 +3,13 @@ import CoreAudio
 import Foundation
 import os
 
-/// Captures system audio from a specific process (or all system audio) using CoreAudio Taps (macOS 14.2+).
+/// Captures system audio from a specific process (or all system audio) using CoreAudio Taps (macOS 14.2+),
+/// or directly from a specific device via HAL AudioUnit.
 /// Outputs raw PCM buffers (16kHz mono Int16) via callback.
 ///
-/// CoreAudio Tap API sequence:
-/// 1. Create a CATapDescription targeting a specific process or all output
-/// 2. Create the tap via AudioHardwareCreateProcessTap
-/// 3. Build an aggregate device that includes the tap
-/// 4. Set up a HAL Output AudioUnit to pull audio from the aggregate device
-/// 5. Render callback delivers 16kHz mono Int16 samples via BufferCallback
+/// Dual start paths:
+/// - `start(processID:onBuffer:)` — v1.0 process tap path via aggregate device
+/// - `start(deviceUID:onBuffer:)` — direct HAL AudioUnit on a specific device (no tap, no aggregate)
 private let systemAudioCaptureLogger = Logger(subsystem: "com.caddie.app", category: "SystemAudioCapture")
 
 final class SystemAudioCapture {
@@ -38,6 +36,7 @@ final class SystemAudioCapture {
 
     private var aggregateDeviceID: AudioDeviceID = kAudioObjectUnknown
     private var tapObjectID: AudioObjectID = kAudioObjectUnknown
+    private var directDeviceID: AudioDeviceID = kAudioObjectUnknown
     private var isRunning = false
 
     // Target format: 16kHz mono 16-bit signed integer PCM
@@ -123,12 +122,52 @@ final class SystemAudioCapture {
         }
     }
 
+    /// Start capturing from a specific device directly (no process tap, no aggregate device).
+    /// Used when user selects a Loopback virtual device or other input device.
+    /// - Parameters:
+    ///   - deviceUID: Persistent UID string of the target device.
+    ///   - onBuffer: Callback receiving Int16 PCM samples at 16kHz mono.
+    func start(deviceUID: String, onBuffer: @escaping BufferCallback) throws {
+        guard !isRunning else {
+            logger.warning("SystemAudioCapture already running")
+            return
+        }
+
+        self.onBuffer = onBuffer
+
+        guard let deviceID = Self.resolveDeviceUID(deviceUID) else {
+            throw CaptureError.deviceNotFound(deviceUID)
+        }
+
+        do {
+            // Skip setupTap() entirely -- no tap, no aggregate device
+            // Direct HAL AudioUnit on the resolved device
+            try setupAudioUnitForDevice(deviceID)
+            registerDeviceAliveListenerForDevice(deviceID)
+            try startAudioUnit()
+
+            directDeviceID = deviceID
+            isRunning = true
+            logger.info("System audio capture started via direct device (UID: \(deviceUID))")
+        } catch {
+            logger.error("Failed to start direct device capture: \(error.localizedDescription)")
+            cleanupDirectDevice()
+            throw error
+        }
+    }
+
     /// Stop capturing and release all resources.
     func stop() {
         guard isRunning else { return }
         isRunning = false
 
-        removeDeviceAliveListener()
+        if directDeviceID != kAudioObjectUnknown {
+            // Direct device path cleanup
+            removeDeviceAliveListenerForDevice()
+        } else {
+            // Aggregate device path cleanup (v1.0)
+            removeDeviceAliveListener()
+        }
 
         if let unit = audioUnit {
             AudioOutputUnitStop(unit)
@@ -146,8 +185,12 @@ final class SystemAudioCapture {
             renderContext = nil
         }
 
-        destroyAggregateDevice()
-        destroyTap()
+        if directDeviceID != kAudioObjectUnknown {
+            directDeviceID = kAudioObjectUnknown
+        } else {
+            destroyAggregateDevice()
+            destroyTap()
+        }
 
         onBuffer = nil
         logger.info("System audio capture stopped")
@@ -440,7 +483,11 @@ final class SystemAudioCapture {
     // MARK: - Cleanup
 
     private func cleanup() {
-        removeDeviceAliveListener()
+        if directDeviceID != kAudioObjectUnknown {
+            removeDeviceAliveListenerForDevice()
+        } else {
+            removeDeviceAliveListener()
+        }
 
         if let unit = audioUnit {
             AudioUnitUninitialize(unit)
@@ -455,8 +502,12 @@ final class SystemAudioCapture {
             renderContext = nil
         }
 
-        destroyAggregateDevice()
-        destroyTap()
+        if directDeviceID != kAudioObjectUnknown {
+            directDeviceID = kAudioObjectUnknown
+        } else {
+            destroyAggregateDevice()
+            destroyTap()
+        }
         onBuffer = nil
     }
 
@@ -474,6 +525,214 @@ final class SystemAudioCapture {
         }
     }
 
+    // MARK: - Direct Device Path
+
+    /// Resolve a persistent device UID string to a transient AudioDeviceID via CoreAudio.
+    private static func resolveDeviceUID(_ uid: String) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDeviceForUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        var deviceID: AudioDeviceID = kAudioObjectUnknown
+        var cfUID = uid as CFString
+
+        var translation = AudioValueTranslation(
+            mInputData: &cfUID,
+            mInputDataSize: UInt32(MemoryLayout<CFString>.size),
+            mOutputData: &deviceID,
+            mOutputDataSize: UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+
+        var translationSize = UInt32(MemoryLayout<AudioValueTranslation>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &translationSize,
+            &translation
+        )
+
+        guard status == noErr, deviceID != kAudioObjectUnknown else {
+            return nil
+        }
+
+        return deviceID
+    }
+
+    /// Set up a HAL Output AudioUnit for a specific device following TN2091 order.
+    /// Same setup as `setupAudioUnit()` but uses the passed deviceID instead of aggregateDeviceID.
+    private func setupAudioUnitForDevice(_ deviceID: AudioDeviceID) throws {
+        // Step 1: Find HAL Output component
+        var desc = AudioComponentDescription(
+            componentType: kAudioUnitType_Output,
+            componentSubType: kAudioUnitSubType_HALOutput,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+
+        guard let component = AudioComponentFindNext(nil, &desc) else {
+            throw CaptureError.audioComponentNotFound
+        }
+
+        var unit: AudioComponentInstance?
+        var status = AudioComponentInstanceNew(component, &unit)
+        guard status == noErr, let audioUnit = unit else {
+            throw CaptureError.failedToCreateAudioUnit(status)
+        }
+        self.audioUnit = audioUnit
+
+        // Step 2: Enable input on bus 1
+        var enableIO: UInt32 = 1
+        status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_EnableIO,
+            kAudioUnitScope_Input,
+            1,
+            &enableIO,
+            UInt32(MemoryLayout<UInt32>.size)
+        )
+        guard status == noErr else {
+            throw CaptureError.failedToConfigureAudioUnit(status)
+        }
+
+        // Step 3: Disable output on bus 0
+        var disableIO: UInt32 = 0
+        status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_EnableIO,
+            kAudioUnitScope_Output,
+            0,
+            &disableIO,
+            UInt32(MemoryLayout<UInt32>.size)
+        )
+        guard status == noErr else {
+            throw CaptureError.failedToConfigureAudioUnit(status)
+        }
+
+        // Step 4: Set device (MUST be after enabling IO)
+        var devID = deviceID
+        status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &devID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        guard status == noErr else {
+            throw CaptureError.failedToSetDevice(status)
+        }
+
+        // Step 5: Set output format on bus 1 output scope to 16kHz mono Int16
+        var outputFormat = AudioStreamBasicDescription(
+            mSampleRate: Self.targetSampleRate,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 2,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 2,
+            mChannelsPerFrame: 1,
+            mBitsPerChannel: 16,
+            mReserved: 0
+        )
+
+        status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioUnitProperty_StreamFormat,
+            kAudioUnitScope_Output,
+            1,
+            &outputFormat,
+            UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        )
+        guard status == noErr else {
+            throw CaptureError.failedToSetFormat(status)
+        }
+
+        // Step 6: Set render callback via retained context object
+        let context = RenderContext()
+        context.audioUnit = audioUnit
+        context.onBuffer = onBuffer
+        self.renderContext = context
+
+        var callbackStruct = AURenderCallbackStruct(
+            inputProc: systemAudioRenderCallback,
+            inputProcRefCon: Unmanaged.passRetained(context).toOpaque()
+        )
+
+        status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_SetInputCallback,
+            kAudioUnitScope_Global,
+            0,
+            &callbackStruct,
+            UInt32(MemoryLayout<AURenderCallbackStruct>.size)
+        )
+        guard status == noErr else {
+            throw CaptureError.failedToSetCallback(status)
+        }
+
+        // Step 7: Initialize
+        status = AudioUnitInitialize(audioUnit)
+        guard status == noErr else {
+            throw CaptureError.failedToInitializeAudioUnit(status)
+        }
+    }
+
+    private func registerDeviceAliveListenerForDevice(_ deviceID: AudioDeviceID) {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        let status = AudioObjectAddPropertyListener(
+            deviceID,
+            &address,
+            deviceAliveListener,
+            Unmanaged.passUnretained(self).toOpaque()
+        )
+        if status != noErr {
+            logger.warning("Failed to register direct device alive listener: OSStatus \(status)")
+        }
+    }
+
+    private func removeDeviceAliveListenerForDevice() {
+        guard directDeviceID != kAudioObjectUnknown else { return }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListener(
+            directDeviceID,
+            &address,
+            deviceAliveListener,
+            Unmanaged.passUnretained(self).toOpaque()
+        )
+    }
+
+    private func cleanupDirectDevice() {
+        if let unit = audioUnit {
+            AudioUnitUninitialize(unit)
+            AudioComponentInstanceDispose(unit)
+            audioUnit = nil
+        }
+
+        if let ctx = renderContext {
+            ctx.audioUnit = nil
+            ctx.onBuffer = nil
+            Unmanaged.passUnretained(ctx).release()
+            renderContext = nil
+        }
+
+        directDeviceID = kAudioObjectUnknown
+        onBuffer = nil
+    }
+
     // MARK: - Errors
 
     enum CaptureError: Error, LocalizedError {
@@ -481,6 +740,7 @@ final class SystemAudioCapture {
         case failedToTranslatePID(pid_t, OSStatus)
         case failedToGetTapUID(OSStatus)
         case failedToCreateAggregateDevice(OSStatus)
+        case deviceNotFound(String)
         case audioComponentNotFound
         case failedToCreateAudioUnit(OSStatus)
         case failedToConfigureAudioUnit(OSStatus)
@@ -497,6 +757,7 @@ final class SystemAudioCapture {
             case .failedToTranslatePID(let pid, let s): return "Failed to translate PID \(pid) to process object (OSStatus \(s))"
             case .failedToGetTapUID(let s): return "Failed to get tap UID (OSStatus \(s))"
             case .failedToCreateAggregateDevice(let s): return "Failed to create aggregate device (OSStatus \(s))"
+            case .deviceNotFound(let uid): return "Audio device not found: \(uid)"
             case .audioComponentNotFound: return "HAL Output AudioComponent not found"
             case .failedToCreateAudioUnit(let s): return "Failed to create AudioUnit (OSStatus \(s))"
             case .failedToConfigureAudioUnit(let s): return "Failed to configure AudioUnit (OSStatus \(s))"
@@ -513,9 +774,11 @@ final class SystemAudioCapture {
 
 // MARK: - Device Alive Listener (free function)
 
-/// Called by CoreAudio when the aggregate device's alive status changes.
-/// Uses Unmanaged.passUnretained(self) -- safe because removeDeviceAliveListener()
-/// is called synchronously in stop()/cleanup() before self can deallocate.
+/// Called by CoreAudio when a device's alive status changes.
+/// Works for both aggregate devices (v1.0 path) and direct devices (v2.0 path).
+/// Uses Unmanaged.passUnretained(self) -- safe because removeDeviceAliveListener()/
+/// removeDeviceAliveListenerForDevice() is called synchronously in stop()/cleanup()
+/// before self can deallocate.
 private func deviceAliveListener(
     objectID: AudioObjectID,
     numberAddresses: UInt32,
@@ -545,7 +808,7 @@ private func deviceAliveListener(
 // MARK: - Render Callback (free function)
 
 /// The render callback is invoked by the AudioUnit on the real-time audio thread.
-/// It pulls samples from the aggregate device (which includes our tap) and forwards
+/// It pulls samples from the input device (aggregate or direct) and forwards
 /// them as Int16 buffers to the Swift callback.
 ///
 /// Uses a retained RenderContext instead of Unmanaged<SystemAudioCapture> to avoid
