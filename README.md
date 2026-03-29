@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/swift-6.0-F05138?logo=swift&logoColor=white" alt="Swift 6.0">
   <img src="https://img.shields.io/badge/ML-on--device-34C759?logo=apple&logoColor=white" alt="On-device ML">
   <img src="https://img.shields.io/badge/privacy-100%25%20local-007AFF" alt="100% local">
-  <img src="https://img.shields.io/badge/tests-137%20passing-34C759" alt="137 tests">
+  <img src="https://img.shields.io/badge/tests-160%2B%20passing-34C759" alt="160+ tests">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
 </p>
 
@@ -26,13 +26,17 @@ Caddie lives in your menu bar and watches for meetings. When one starts, it reco
 
 | | |
 |---|---|
-| **Detect** | Auto-detects Zoom, Teams, Meet, Slack, Discord, Webex, FaceTime |
-| **Record** | Stereo capture — system audio + microphone in a single file |
+| | |
+|---|---|
+| **Detect** | Auto-detects Zoom, Teams, Meet, Slack, Discord, Webex, FaceTime — or via Google Calendar |
+| **Record** | Stereo capture — system audio + microphone, with configurable input device |
 | **Transcribe** | On-device ASR with speaker diarization via Apple Neural Engine |
 | **Store** | Searchable local database with full-text search across all transcripts |
+| **Calendar** | Google Calendar integration — sign in via OAuth2, auto-detect remote meetings |
+| **Manual** | Start/stop recording anytime from the menu bar |
 | **Notify** | macOS notifications on recording start, transcription complete, and errors |
 
-**Zero cloud dependency.** No accounts. No uploads. No telemetry. Nothing leaves your Mac.
+**Privacy-first.** All processing on-device. Network only for Google Calendar sync (optional) and Sparkle updates.
 
 ## How It Works
 
@@ -44,7 +48,7 @@ Meeting detected ──> Record (stereo WAV) ──> Transcribe (Parakeet ASR)
                                           ──> Notify
 ```
 
-Caddie monitors active audio sessions via CoreAudio, window titles via Accessibility, and calendar events via EventKit. When a meeting is detected in a supported app, it captures two audio streams through a virtual tap: system audio (other participants) and your microphone.
+Caddie monitors active audio sessions via CoreAudio, window titles via Accessibility, calendar events via EventKit, and (optionally) your Google Calendar via OAuth2. When a meeting is detected — locally or from your calendar — it captures two audio streams: system audio (other participants) and your microphone. You can also start/stop recording manually from the menu bar.
 
 After the meeting ends, a local ML pipeline runs Parakeet ASR and Sortformer speaker diarization on CoreML, accelerated by the Apple Neural Engine. The transcript with speaker labels is stored alongside ALAC-compressed audio in a GRDB-backed SQLite database, fully indexed for search.
 
@@ -55,7 +59,7 @@ Built on a hardened, production-solid foundation:
 - **RecordingCoordinator** — Actor-based state machine managing the full lifecycle (`idle -> recording -> transcribing -> done/error`)
 - **Lock-free audio** — SPSC ring buffers on the real-time CoreAudio thread (no locks, no priority inversion)
 - **Protocol-based DI** — ML engines abstracted behind protocols for testability without hardware
-- **137 tests** — covering state transitions, pipeline error paths, data integrity, migrations, and ring buffer behavior
+- **160+ tests** — covering state transitions, pipeline error paths, data integrity, auth flows, and ring buffer behavior
 - **Every error handled** — zero `try?`, zero force unwraps, all closures guarded
 
 ## Requirements
@@ -79,12 +83,27 @@ Grab the latest `.dmg` from [Releases](../../releases), mount it, and drag Caddi
 ### Build from Source
 
 ```bash
-brew install xcodegen
+brew install xcodegen create-dmg
 xcodegen generate
 open Caddie.xcodeproj
 ```
 
-Build and run with **Cmd+R** in Xcode.
+Build and run with **Cmd+R** in Xcode. Or build a DMG:
+
+```bash
+make dmg
+```
+
+### Google Calendar Setup (Optional)
+
+To enable Google Calendar integration:
+
+1. Create a project in [Google Cloud Console](https://console.cloud.google.com)
+2. Enable the **Google Calendar API**
+3. Configure **OAuth consent screen** (External, Testing mode, add your email as test user)
+4. Create an **OAuth 2.0 Client ID** (Desktop application type)
+5. Replace the placeholder client ID in `Sources/Calendar/GoogleOAuthConfig.swift` and `Resources/Info.plist`
+6. Run `xcodegen generate` to regenerate the project
 
 ## Permissions
 
@@ -101,10 +120,9 @@ All requested through standard macOS prompts. Revoke anytime in System Settings 
 ## Privacy
 
 - All audio and transcripts stored locally on your Mac
-- No data sent to any server, ever
+- Google Calendar sync is optional — only reads event metadata (titles, times), never uploads audio or transcripts
 - No analytics, telemetry, or crash reporting
-- No account required
-- ML models downloaded once, cached locally forever
+- ML models bundled in the app — no runtime downloads
 - Recordings are yours — export, move, or delete anytime
 
 ## Tech Stack
@@ -116,13 +134,23 @@ All requested through standard macOS prompts. Revoke anytime in System Settings 
 | **Audio** | CoreAudio, AVFoundation, lock-free SPSC ring buffers |
 | **ML** | FluidAudio (Parakeet ASR + Sortformer diarization on CoreML/ANE) |
 | **Database** | GRDB 7.10 (SQLite with FTS5 full-text search) |
-| **Detection** | CoreAudio process monitoring, AXSwift (Accessibility), EventKit |
+| **Detection** | CoreAudio process monitoring, AXSwift (Accessibility), EventKit, Google Calendar API |
+| **Auth** | ASWebAuthenticationSession, PKCE, macOS Keychain |
 | **Updates** | Sparkle |
 | **Build** | XcodeGen, Swift Package Manager |
 
 ## Roadmap
 
-### Recently Shipped
+### Recently Shipped (v2.0)
+
+- Google OAuth2 sign-in with PKCE (browser-based, tokens in Keychain)
+- Google Calendar integration during onboarding
+- Audio device picker (select Loopback/Jump Desktop as capture source)
+- HAL AudioUnit rewrite for microphone capture
+- Manual start/stop recording from menu bar
+- Google Account section in Settings (sign-in/sign-out)
+
+### Foundation (v1.0)
 
 - Lock-free audio capture (SPSC ring buffers, no priority inversion)
 - Actor-based recording coordinator with explicit state machine
@@ -135,18 +163,10 @@ All requested through standard macOS prompts. Revoke anytime in System Settings 
 
 ### Up Next
 
-- **Crash recovery** — persist recording state to disk, recover incomplete sessions on relaunch
-- **Auto-retry** — exponential backoff for transient transcription failures (30s, 60s, 120s)
-- **Calendar prompts** — notification before meetings asking "Record?" with one-tap confirmation
+- **Calendar-based detection** — auto-start recording when Google Calendar meetings begin
+- **Pre-meeting notification** — "Recording starts in 2 min" prompt before scheduled meetings
+- **Calendar metadata** — show event title and attendees in meeting list
 - **AI summaries** — action items, key decisions, and highlights extracted from transcripts
-- **Recording health dashboard** — success/failure stats, disk usage trends in Settings
-
-### Future
-
-- Proactive disk monitoring during recording
-- Structured error logging for bug reports
-- Meeting detection conflict resolution UI
-- Accessibility audit / VoiceOver support
 
 ## License
 
