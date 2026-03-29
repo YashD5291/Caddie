@@ -8,6 +8,7 @@ struct OnboardingView: View {
     @State private var accessibilityStatus: PermissionStatus = Permissions.accessibility
     @State private var isRequesting = false
     @State private var showModelDownload = false
+    @State private var showGoogleSignIn = false
 
     private var permissionsGranted: Bool {
         micStatus == .granted && accessibilityStatus == .granted
@@ -32,7 +33,9 @@ struct OnboardingView: View {
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, 32)
 
-            if showModelDownload {
+            if showGoogleSignIn {
+                googleSignInSection
+            } else if showModelDownload {
                 modelDownloadSection
             } else {
                 permissionsSection
@@ -134,8 +137,8 @@ struct OnboardingView: View {
                 Text("Models Ready")
                     .font(.headline)
 
-                Button("Get Started") {
-                    isComplete = true
+                Button("Continue") {
+                    showGoogleSignIn = true
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
@@ -157,6 +160,94 @@ struct OnboardingView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: 400)
+    }
+
+    // MARK: - Google Sign-In Section
+
+    @ViewBuilder
+    private var googleSignInSection: some View {
+        VStack(spacing: 16) {
+            switch appState.googleAuthState {
+            case .signedIn(let email):
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.green)
+
+                Text("Signed in as \(email)")
+                    .font(.headline)
+
+                Button("Get Started") {
+                    isComplete = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.large)
+
+            case .signingIn:
+                ProgressView()
+                    .controlSize(.regular)
+                Text("Signing in...")
+                    .font(.headline)
+
+            case .error(let message):
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.orange)
+
+                Text("Sign-in failed")
+                    .font(.headline)
+
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 350)
+
+                Button("Try Again") {
+                    guard let window = NSApplication.shared.keyWindow else { return }
+                    appState.signInToGoogle(window: window)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.large)
+
+                Button("Skip for Now") {
+                    isComplete = true
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            case .signedOut:
+                Image(systemName: "calendar.badge.plus")
+                    .font(.system(size: 48, weight: .thin))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.orange)
+
+                Text("Connect Google Calendar")
+                    .font(.headline)
+
+                Text("Caddie can automatically detect and record your Google Calendar meetings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 350)
+
+                Button("Sign in with Google") {
+                    guard let window = NSApplication.shared.keyWindow else { return }
+                    appState.signInToGoogle(window: window)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.large)
+
+                Button("Skip for Now") {
+                    isComplete = true
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: 400)

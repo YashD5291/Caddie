@@ -72,29 +72,8 @@ actor GoogleAuthManager {
         let challenge = Self.generateCodeChallenge(from: verifier)
         let authURL = Self.buildAuthorizationURL(codeChallenge: challenge)
 
-        let code = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            let session = ASWebAuthenticationSession(
-                url: authURL,
-                callbackURLScheme: GoogleOAuthConfig.callbackScheme
-            ) { callbackURL, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard let url = callbackURL,
-                      let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                        .queryItems?.first(where: { $0.name == "code" })?.value else {
-                    continuation.resume(throwing: GoogleAuthError.noAuthCode)
-                    return
-                }
-                continuation.resume(returning: code)
-            }
-
-            let provider = AuthPresentationContext(window: window)
-            session.presentationContextProvider = provider
-            session.prefersEphemeralWebBrowserSession = true
-            session.start()
-        }
+        // ASWebAuthenticationSession must be created and started on MainActor
+        let code = try await Self.presentAuthSession(url: authURL, window: window)
 
         // Exchange code for tokens
         let tokens = try await exchangeCodeForTokens(code: code, verifier: verifier)
@@ -198,6 +177,35 @@ actor GoogleAuthManager {
     }
     #endif
 
+    // MARK: - Auth Session (MainActor)
+
+    @MainActor
+    private static func presentAuthSession(url: URL, window: NSWindow) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            let session = ASWebAuthenticationSession(
+                url: url,
+                callbackURLScheme: GoogleOAuthConfig.callbackScheme
+            ) { callbackURL, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let url = callbackURL,
+                      let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                        .queryItems?.first(where: { $0.name == "code" })?.value else {
+                    continuation.resume(throwing: GoogleAuthError.noAuthCode)
+                    return
+                }
+                continuation.resume(returning: code)
+            }
+
+            let provider = AuthPresentationContext(window: window)
+            session.presentationContextProvider = provider
+            session.prefersEphemeralWebBrowserSession = true
+            session.start()
+        }
+    }
+
     // MARK: - Private Helpers
 
     private func exchangeCodeForTokens(code: String, verifier: String) async throws -> TokenResponse {
@@ -299,6 +307,7 @@ struct TokenResponse: Decodable, Sendable {
 
 // MARK: - Presentation Context Provider
 
+@MainActor
 final class AuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
     private let window: NSWindow
 
@@ -306,7 +315,7 @@ final class AuthPresentationContext: NSObject, ASWebAuthenticationPresentationCo
         self.window = window
     }
 
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        window
+    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        MainActor.assumeIsolated { window }
     }
 }

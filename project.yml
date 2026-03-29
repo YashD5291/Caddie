@@ -44,6 +44,19 @@ targets:
       - name: Download ML Models
         script: "${SRCROOT}/scripts/download-models.sh"
         basedOnDependencyAnalysis: false
+    postBuildScripts:
+      - name: Copy ML Models to Bundle
+        script: |
+          MODELS_SRC="${SRCROOT}/Resources/Models"
+          MODELS_DST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Models"
+          if [ -d "$MODELS_SRC" ]; then
+            mkdir -p "$MODELS_DST"
+            rsync -a --delete "$MODELS_SRC/" "$MODELS_DST/"
+            echo "Copied ML models to bundle"
+          else
+            echo "warning: Models directory not found at $MODELS_SRC"
+          fi
+        basedOnDependencyAnalysis: false
     sources:
       - Sources
       - path: Resources/Assets.xcassets
