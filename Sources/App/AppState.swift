@@ -175,10 +175,10 @@ final class AppState {
         Task { await coordinator?.retryTranscription(meetingId: meetingId) }
     }
 
-    func signInToGoogle(window: NSWindow) {
+    func signInToGoogle() {
         Task {
             do {
-                try await authManager.signIn(presenting: window)
+                try await authManager.signIn()
                 googleAuthState = await authManager.state
             } catch {
                 CaddieLogger.auth.error("Google sign-in failed: \(error.localizedDescription)")

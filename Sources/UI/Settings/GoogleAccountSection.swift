@@ -27,8 +27,7 @@ struct GoogleAccountSection: View {
                 .foregroundStyle(.secondary)
 
             Button("Sign in with Google") {
-                guard let window = NSApplication.shared.keyWindow else { return }
-                appState.signInToGoogle(window: window)
+                appState.signInToGoogle()
             }
         }
     }
@@ -63,8 +62,7 @@ struct GoogleAccountSection: View {
                 .foregroundStyle(.orange)
 
             Button("Try Again") {
-                guard let window = NSApplication.shared.keyWindow else { return }
-                appState.signInToGoogle(window: window)
+                appState.signInToGoogle()
             }
         }
     }

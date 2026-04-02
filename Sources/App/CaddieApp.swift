@@ -5,6 +5,10 @@ struct CaddieApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
 
+    init() {
+        appDelegate.appState = appState
+    }
+
     var body: some Scene {
         MenuBarExtra {
             MenuBarView()
@@ -45,6 +49,9 @@ struct CaddieApp: App {
 // MARK: - AppDelegate
 
 final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
+    /// Set by CaddieApp so AppDelegate can route OAuth callbacks to the auth manager.
+    var appState: AppState?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         CaddieLogger.app.info("Caddie launched")
         NotificationManager.requestAuthorization()
@@ -61,6 +68,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
     func applicationWillTerminate(_ notification: Notification) {
         CaddieLogger.app.info("Caddie terminating")
+    }
+
+    // MARK: - OAuth URL Scheme Handler
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first,
+              url.scheme == GoogleOAuthConfig.callbackScheme else { return }
+        Task {
+            await appState?.authManager.handleRedirectURL(url)
+            await MainActor.run {
+                Task { appState?.googleAuthState = await appState!.authManager.state }
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

@@ -1,5 +1,5 @@
 import Foundation
-import AuthenticationServices
+import AppKit
 import CryptoKit
 import os
 
@@ -63,21 +63,47 @@ actor GoogleAuthManager {
         return components.url!
     }
 
+    // MARK: - Browser Redirect Callback
+
+    /// Pending continuation for the browser-based OAuth redirect.
+    /// Set by signIn(), resumed by handleRedirectURL().
+    private var authContinuation: CheckedContinuation<String, Error>?
+    private var pendingVerifier: String?
+
+    /// Called by AppDelegate when macOS delivers the OAuth redirect URL.
+    func handleRedirectURL(_ url: URL) {
+        guard let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "code" })?.value else {
+            authContinuation?.resume(throwing: GoogleAuthError.noAuthCode)
+            authContinuation = nil
+            return
+        }
+        authContinuation?.resume(returning: code)
+        authContinuation = nil
+    }
+
     // MARK: - Sign In (AUTH-01)
 
-    func signIn(presenting window: NSWindow) async throws {
+    func signIn() async throws {
         state = .signingIn
 
         let verifier = Self.generateCodeVerifier()
         let challenge = Self.generateCodeChallenge(from: verifier)
         let authURL = Self.buildAuthorizationURL(codeChallenge: challenge)
+        pendingVerifier = verifier
 
-        // ASWebAuthenticationSession must be created and started on MainActor
-        let code = try await Self.presentAuthSession(url: authURL, window: window)
+        // Open in user's default browser — uses existing Google session
+        let code = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            self.authContinuation = continuation
+            Task { @MainActor in
+                NSWorkspace.shared.open(authURL)
+            }
+        }
 
         // Exchange code for tokens
         let tokens = try await exchangeCodeForTokens(code: code, verifier: verifier)
         try persistTokens(tokens)
+        pendingVerifier = nil
 
         // Fetch user email
         let email = try await fetchUserEmail(accessToken: tokens.accessToken)
@@ -176,35 +202,6 @@ actor GoogleAuthManager {
         self.tokenExpiry = expiry
     }
     #endif
-
-    // MARK: - Auth Session (MainActor)
-
-    @MainActor
-    private static func presentAuthSession(url: URL, window: NSWindow) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(
-                url: url,
-                callbackURLScheme: GoogleOAuthConfig.callbackScheme
-            ) { callbackURL, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard let url = callbackURL,
-                      let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                        .queryItems?.first(where: { $0.name == "code" })?.value else {
-                    continuation.resume(throwing: GoogleAuthError.noAuthCode)
-                    return
-                }
-                continuation.resume(returning: code)
-            }
-
-            let provider = AuthPresentationContext(window: window)
-            session.presentationContextProvider = provider
-            session.prefersEphemeralWebBrowserSession = true
-            session.start()
-        }
-    }
 
     // MARK: - Private Helpers
 
@@ -305,17 +302,3 @@ struct TokenResponse: Decodable, Sendable {
     }
 }
 
-// MARK: - Presentation Context Provider
-
-@MainActor
-final class AuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
-    private let window: NSWindow
-
-    init(window: NSWindow) {
-        self.window = window
-    }
-
-    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        MainActor.assumeIsolated { window }
-    }
-}

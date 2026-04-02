@@ -207,8 +207,7 @@ struct OnboardingView: View {
                     .frame(maxWidth: 350)
 
                 Button("Try Again") {
-                    guard let window = NSApplication.shared.keyWindow else { return }
-                    appState.signInToGoogle(window: window)
+                    appState.signInToGoogle()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
@@ -236,8 +235,7 @@ struct OnboardingView: View {
                     .frame(maxWidth: 350)
 
                 Button("Sign in with Google") {
-                    guard let window = NSApplication.shared.keyWindow else { return }
-                    appState.signInToGoogle(window: window)
+                    appState.signInToGoogle()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
