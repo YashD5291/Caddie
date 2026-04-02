@@ -135,9 +135,10 @@ actor GoogleAuthManager {
             }
             let newTokens = try await exchangeRefreshToken(refresh)
             self.accessToken = newTokens.accessToken
-            self.tokenExpiry = Date().addingTimeInterval(Double(newTokens.expiresIn))
+            let newExpiry = Date().addingTimeInterval(Double(newTokens.expiresIn))
+            self.tokenExpiry = newExpiry
             try KeychainHelper.save(key: "access_token", data: Data(newTokens.accessToken.utf8))
-            try KeychainHelper.save(key: "token_expiry", data: Data(String(self.tokenExpiry!.timeIntervalSince1970).utf8))
+            try KeychainHelper.save(key: "token_expiry", data: Data(String(newExpiry.timeIntervalSince1970).utf8))
             logger.info("Token refreshed successfully")
             return newTokens.accessToken
         }
@@ -149,11 +150,15 @@ actor GoogleAuthManager {
 
     func signOut() async {
         // Best-effort server-side revocation
-        if let token = accessToken ?? refreshToken {
-            var request = URLRequest(url: URL(string: "\(GoogleOAuthConfig.revocationURL)?token=\(token)")!)
-            request.httpMethod = "POST"
-            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            _ = try? await URLSession.shared.data(for: request)
+        if let token = accessToken ?? refreshToken,
+           var components = URLComponents(string: GoogleOAuthConfig.revocationURL) {
+            components.queryItems = [URLQueryItem(name: "token", value: token)]
+            if let url = components.url {
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+                _ = try? await URLSession.shared.data(for: request)
+            }
         }
 
         accessToken = nil

@@ -94,9 +94,13 @@ final class AppState {
 
             // 5. Create coordinator with all dependencies -- eliminates init race (REC-04)
             // All deps are non-optional: coordinator cannot exist without a working pipeline
+            guard let db = database else {
+                initError = "Database failed to initialize"
+                return
+            }
             let deviceManager = audioDeviceManager
             let newCoordinator = RecordingCoordinator(
-                database: database!,
+                database: db,
                 recorder: AudioRecorder(),
                 pipeline: pipeline,
                 detector: MeetingDetector(),

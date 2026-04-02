@@ -4,6 +4,7 @@ import SwiftUI
 struct CaddieApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
+    @Environment(\.openWindow) private var openWindow
 
     init() {
         appDelegate.appState = appState
@@ -36,6 +37,11 @@ struct CaddieApp: App {
         Window("Caddie", id: "main") {
             ContentView()
                 .environment(appState)
+                .onAppear {
+                    // Switch to regular app mode when main window appears
+                    NSApp.setActivationPolicy(.regular)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
         }
         .defaultSize(width: 800, height: 600)
 
@@ -49,17 +55,21 @@ struct CaddieApp: App {
 // MARK: - AppDelegate
 
 final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
-    /// Set by CaddieApp so AppDelegate can route OAuth callbacks to the auth manager.
     var appState: AppState?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         CaddieLogger.app.info("Caddie launched")
         NotificationManager.requestAuthorization()
 
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(windowDidBecomeKey(_:)),
-            name: NSWindow.didBecomeKeyNotification, object: nil
-        )
+        // Open main window on launch so the app behaves like a standard macOS app
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.regular)
+            if let window = NSApp.windows.first(where: { $0.title.contains("Caddie") && $0.styleMask.contains(.titled) }) {
+                window.makeKeyAndOrderFront(nil)
+            }
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
         NotificationCenter.default.addObserver(
             self, selector: #selector(windowWillClose(_:)),
             name: NSWindow.willCloseNotification, object: nil
@@ -70,15 +80,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         CaddieLogger.app.info("Caddie terminating")
     }
 
+    // MARK: - Reopen on Dock Click
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            // User clicked dock icon with no visible windows — reopen main window
+            NSApp.setActivationPolicy(.regular)
+            if let window = NSApp.windows.first(where: { $0.title.contains("Caddie") && $0.styleMask.contains(.titled) }) {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+        return true
+    }
+
     // MARK: - OAuth URL Scheme Handler
 
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.first,
               url.scheme == GoogleOAuthConfig.callbackScheme else { return }
+        guard let appState else { return }
         Task {
-            await appState?.authManager.handleRedirectURL(url)
+            await appState.authManager.handleRedirectURL(url)
+            let newState = await appState.authManager.state
             await MainActor.run {
-                Task { appState?.googleAuthState = await appState!.authManager.state }
+                appState.googleAuthState = newState
             }
         }
     }
@@ -87,29 +112,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         false
     }
 
-    // MARK: - Dynamic Activation Policy
-
-    @objc private func windowDidBecomeKey(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              isMainAppWindow(window) else { return }
-        NSApp.setActivationPolicy(.regular)
-    }
+    // MARK: - Window Lifecycle
 
     @objc private func windowWillClose(_ notification: Notification) {
         Task { @MainActor in
             let hasVisibleMainWindow = NSApp.windows.contains {
-                $0.isVisible && self.isMainAppWindow($0)
+                $0.isVisible && $0.styleMask.contains(.titled)
+                    && !$0.className.contains("Settings")
+                    && $0.title.contains("Caddie")
             }
             if !hasVisibleMainWindow {
                 NSApp.setActivationPolicy(.accessory)
             }
         }
-    }
-
-    private func isMainAppWindow(_ window: NSWindow) -> Bool {
-        window.styleMask.contains(.titled)
-            && !window.className.contains("Settings")
-            && !window.className.contains("MenuBar")
-            && window.title.contains("Caddie")
     }
 }
