@@ -66,50 +66,79 @@ actor GoogleAuthManager {
     // MARK: - Browser Redirect Callback
 
     /// Pending continuation for the browser-based OAuth redirect.
-    /// Set by signIn(), resumed by handleRedirectURL().
+    /// Set by signIn(), resumed by handleRedirectURL() or cancelSignIn().
     private var authContinuation: CheckedContinuation<String, Error>?
     private var pendingVerifier: String?
 
     /// Called by AppDelegate when macOS delivers the OAuth redirect URL.
     func handleRedirectURL(_ url: URL) {
-        guard let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "code" })?.value else {
-            authContinuation?.resume(throwing: GoogleAuthError.noAuthCode)
-            authContinuation = nil
+        guard let continuation = authContinuation else {
+            logger.warning("Received OAuth redirect with no pending sign-in")
             return
         }
-        authContinuation?.resume(returning: code)
         authContinuation = nil
+
+        guard let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "code" })?.value else {
+            let errorReason = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "error" })?.value ?? "unknown"
+            logger.error("OAuth redirect missing code, error: \(errorReason)")
+            continuation.resume(throwing: GoogleAuthError.noAuthCode)
+            return
+        }
+        continuation.resume(returning: code)
+    }
+
+    /// Cancel a pending sign-in (e.g., user clicked Cancel or timed out).
+    func cancelSignIn() {
+        if let continuation = authContinuation {
+            authContinuation = nil
+            pendingVerifier = nil
+            continuation.resume(throwing: GoogleAuthError.noAuthCode)
+        }
+        state = .signedOut
     }
 
     // MARK: - Sign In (AUTH-01)
 
     func signIn() async throws {
+        // Guard against double sign-in
+        if authContinuation != nil {
+            logger.warning("Sign-in already in progress, ignoring duplicate request")
+            return
+        }
+
         state = .signingIn
 
         let verifier = Self.generateCodeVerifier()
         let challenge = Self.generateCodeChallenge(from: verifier)
         let authURL = Self.buildAuthorizationURL(codeChallenge: challenge)
         pendingVerifier = verifier
+        defer { pendingVerifier = nil }
 
-        // Open in user's default browser — uses existing Google session
-        let code = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
-            self.authContinuation = continuation
-            Task { @MainActor in
-                NSWorkspace.shared.open(authURL)
+        do {
+            // Open in user's default browser — uses existing Google session
+            let code = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+                self.authContinuation = continuation
+                Task { @MainActor in
+                    NSWorkspace.shared.open(authURL)
+                }
             }
+
+            // Exchange code for tokens
+            let tokens = try await exchangeCodeForTokens(code: code, verifier: verifier)
+            try persistTokens(tokens)
+
+            // Fetch user email
+            let email = try await fetchUserEmail(accessToken: tokens.accessToken)
+            try KeychainHelper.save(key: "user_email", data: Data(email.utf8))
+            state = .signedIn(email: email)
+            logger.info("Signed in as \(email)")
+        } catch {
+            state = .error(error.localizedDescription)
+            logger.error("Sign-in failed: \(error.localizedDescription)")
+            throw error
         }
-
-        // Exchange code for tokens
-        let tokens = try await exchangeCodeForTokens(code: code, verifier: verifier)
-        try persistTokens(tokens)
-        pendingVerifier = nil
-
-        // Fetch user email
-        let email = try await fetchUserEmail(accessToken: tokens.accessToken)
-        try KeychainHelper.save(key: "user_email", data: Data(email.utf8))
-        state = .signedIn(email: email)
-        logger.info("Signed in as \(email)")
     }
 
     // MARK: - Token Access (AUTH-03: serialized refresh)
@@ -165,7 +194,6 @@ actor GoogleAuthManager {
         refreshToken = nil
         tokenExpiry = nil
         KeychainHelper.deleteAll()
-        KeychainHelper.delete(key: "user_email")
         state = .signedOut
         logger.info("Signed out and cleared tokens")
     }

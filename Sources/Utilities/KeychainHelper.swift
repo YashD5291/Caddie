@@ -54,7 +54,7 @@ enum KeychainHelper {
     }
 
     static func deleteAll() {
-        for key in ["access_token", "refresh_token", "token_expiry"] {
+        for key in ["access_token", "refresh_token", "token_expiry", "user_email"] {
             delete(key: key)
         }
     }

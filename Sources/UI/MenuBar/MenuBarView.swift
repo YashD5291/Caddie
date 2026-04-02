@@ -64,6 +64,7 @@ struct MenuBarView: View {
             Section("Recent") {
                 ForEach(meetings) { meeting in
                     Button {
+                        NSApp.setActivationPolicy(.regular)
                         openWindow(id: "main")
                         NSApp.activate(ignoringOtherApps: true)
                     } label: {
@@ -79,6 +80,7 @@ struct MenuBarView: View {
     @ViewBuilder
     private var actionsSection: some View {
         Button {
+            NSApp.setActivationPolicy(.regular)
             openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         } label: {

@@ -4,7 +4,6 @@ import SwiftUI
 struct CaddieApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
-    @Environment(\.openWindow) private var openWindow
 
     init() {
         appDelegate.appState = appState
@@ -37,11 +36,6 @@ struct CaddieApp: App {
         Window("Caddie", id: "main") {
             ContentView()
                 .environment(appState)
-                .onAppear {
-                    // Switch to regular app mode when main window appears
-                    NSApp.setActivationPolicy(.regular)
-                    NSApp.activate(ignoringOtherApps: true)
-                }
         }
         .defaultSize(width: 800, height: 600)
 
@@ -54,7 +48,8 @@ struct CaddieApp: App {
 
 // MARK: - AppDelegate
 
-final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
     var appState: AppState?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -64,12 +59,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         // Open main window on launch so the app behaves like a standard macOS app
         DispatchQueue.main.async {
             NSApp.setActivationPolicy(.regular)
-            if let window = NSApp.windows.first(where: { $0.title.contains("Caddie") && $0.styleMask.contains(.titled) }) {
-                window.makeKeyAndOrderFront(nil)
-            }
+            Self.findMainWindow()?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
 
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(windowDidBecomeKey(_:)),
+            name: NSWindow.didBecomeKeyNotification, object: nil
+        )
         NotificationCenter.default.addObserver(
             self, selector: #selector(windowWillClose(_:)),
             name: NSWindow.willCloseNotification, object: nil
@@ -84,11 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
-            // User clicked dock icon with no visible windows — reopen main window
             NSApp.setActivationPolicy(.regular)
-            if let window = NSApp.windows.first(where: { $0.title.contains("Caddie") && $0.styleMask.contains(.titled) }) {
-                window.makeKeyAndOrderFront(nil)
-            }
+            Self.findMainWindow()?.makeKeyAndOrderFront(nil)
         }
         return true
     }
@@ -102,9 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
         Task {
             await appState.authManager.handleRedirectURL(url)
             let newState = await appState.authManager.state
-            await MainActor.run {
-                appState.googleAuthState = newState
-            }
+            appState.googleAuthState = newState
         }
     }
 
@@ -114,16 +106,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @unchecked Sendable {
 
     // MARK: - Window Lifecycle
 
+    @objc private func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              Self.isMainAppWindow(window) else { return }
+        NSApp.setActivationPolicy(.regular)
+    }
+
     @objc private func windowWillClose(_ notification: Notification) {
         Task { @MainActor in
             let hasVisibleMainWindow = NSApp.windows.contains {
-                $0.isVisible && $0.styleMask.contains(.titled)
-                    && !$0.className.contains("Settings")
-                    && $0.title.contains("Caddie")
+                $0.isVisible && Self.isMainAppWindow($0)
             }
             if !hasVisibleMainWindow {
                 NSApp.setActivationPolicy(.accessory)
             }
         }
+    }
+
+    // MARK: - Window Identification
+
+    private static func isMainAppWindow(_ window: NSWindow) -> Bool {
+        // Match by SwiftUI Window identifier when available, fall back to title
+        if let identifier = window.identifier?.rawValue, identifier.contains("main") {
+            return true
+        }
+        return window.styleMask.contains(.titled)
+            && !window.className.contains("Settings")
+            && !window.className.contains("MenuBar")
+            && window.title.contains("Caddie")
+    }
+
+    static func findMainWindow() -> NSWindow? {
+        NSApp.windows.first(where: { isMainAppWindow($0) })
     }
 }

@@ -55,11 +55,13 @@ final class KeychainHelperTests: XCTestCase {
         try KeychainHelper.save(key: "access_token", data: Data("at".utf8))
         try KeychainHelper.save(key: "refresh_token", data: Data("rt".utf8))
         try KeychainHelper.save(key: "token_expiry", data: Data("exp".utf8))
+        try KeychainHelper.save(key: "user_email", data: Data("test@test.com".utf8))
 
         KeychainHelper.deleteAll()
 
         XCTAssertNil(KeychainHelper.load(key: "access_token"))
         XCTAssertNil(KeychainHelper.load(key: "refresh_token"))
         XCTAssertNil(KeychainHelper.load(key: "token_expiry"))
+        XCTAssertNil(KeychainHelper.load(key: "user_email"))
     }
 }

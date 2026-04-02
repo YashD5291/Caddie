@@ -191,6 +191,15 @@ struct OnboardingView: View {
                     .controlSize(.regular)
                 Text("Signing in...")
                     .font(.headline)
+                Text("Complete sign-in in your browser.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button("Cancel") {
+                    appState.cancelGoogleSignIn()
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             case .error(let message):
                 Image(systemName: "exclamationmark.triangle")

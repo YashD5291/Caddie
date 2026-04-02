@@ -180,6 +180,7 @@ final class AppState {
     }
 
     func signInToGoogle() {
+        googleAuthState = .signingIn
         Task {
             do {
                 try await authManager.signIn()
@@ -188,6 +189,13 @@ final class AppState {
                 CaddieLogger.auth.error("Google sign-in failed: \(error.localizedDescription)")
                 googleAuthState = await authManager.state
             }
+        }
+    }
+
+    func cancelGoogleSignIn() {
+        Task {
+            await authManager.cancelSignIn()
+            googleAuthState = await authManager.state
         }
     }
 

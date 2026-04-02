@@ -33,11 +33,17 @@ struct GoogleAccountSection: View {
     }
 
     private var signingInView: some View {
-        HStack {
-            ProgressView()
-                .controlSize(.small)
-            Text("Signing in...")
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Signing in...")
+                    .foregroundStyle(.secondary)
+            }
+
+            Button("Cancel") {
+                appState.cancelGoogleSignIn()
+            }
         }
     }
 
