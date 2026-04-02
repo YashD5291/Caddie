@@ -14,6 +14,7 @@ final class KeychainHelperTests: XCTestCase {
         KeychainHelper.delete(key: "access_token")
         KeychainHelper.delete(key: "refresh_token")
         KeychainHelper.delete(key: "token_expiry")
+        KeychainHelper.delete(key: "user_email")
         super.tearDown()
     }
 
