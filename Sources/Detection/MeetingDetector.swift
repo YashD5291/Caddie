@@ -22,6 +22,7 @@ final class MeetingDetector {
 
     var onMeetingStarted: ((DetectedMeeting) -> Void)?
     var onMeetingEnded: (() -> Void)?
+    var onMeetingPrompt: ((String) -> Void)?
 
     var graceSeconds: TimeInterval = 15.0
 
@@ -33,7 +34,6 @@ final class MeetingDetector {
     private var audioMonitor: any DetectionMonitor = AudioProcessMonitor()
     private var micMonitor: any DetectionMonitor = MicStateMonitor()
     private var windowMonitor: any DetectionMonitor = WindowTitleMonitor()
-    private var calendarMonitor: any DetectionMonitor = CalendarMonitor()
 
     private var graceTimer: Timer?
     private var graceElapsed: TimeInterval = 0
@@ -64,18 +64,9 @@ final class MeetingDetector {
             }
             self.handleSignal(signal)
         }
-        calendarMonitor.onSignal = { [weak self] signal in
-            guard let self else {
-                CaddieLogger.detection.warning("MeetingDetector deallocated -- calendar signal dropped")
-                return
-            }
-            self.handleSignal(signal)
-        }
-
         audioMonitor.start()
         micMonitor.start()
         windowMonitor.start()
-        calendarMonitor.start()
     }
 
     func stop() {
@@ -83,7 +74,6 @@ final class MeetingDetector {
         audioMonitor.stop()
         micMonitor.stop()
         windowMonitor.stop()
-        calendarMonitor.stop()
         cancelGrace()
         activeSignals = []
         isDetectingMeeting = false
@@ -104,26 +94,25 @@ final class MeetingDetector {
         }
 
         // Evaluate
-        let result = engine.evaluate(signals: activeSignals)
+        if let detected = engine.evaluate(signals: activeSignals) {
+            let hasCalendarSignal = activeSignals.contains { $0.source == .googleCalendar && $0.isActive }
 
-        if let meeting = result {
-            if !isDetectingMeeting {
-                // New meeting detected
-                logger.info("Meeting started: \(meeting.app) — \(meeting.title)")
+            if hasCalendarSignal && currentMeeting == nil {
+                // Calendar-based detection: prompt user instead of auto-starting
+                cancelGrace()
+                onMeetingPrompt?(detected.title)
+            } else if currentMeeting == nil {
+                // Non-calendar detection: auto-start as before
+                cancelGrace()
+                currentMeeting = detected
                 isDetectingMeeting = true
-                currentMeeting = meeting
+                onMeetingStarted?(detected)
+                logger.info("Meeting started: \(detected.title) via \(detected.app)")
+            } else if currentMeeting != nil {
                 cancelGrace()
-                onMeetingStarted?(meeting)
-            } else {
-                // Already detecting — update title if better, reset grace
-                if let current = currentMeeting, meeting.title != current.title {
-                    logger.info("Meeting title updated: \(meeting.title)")
-                    currentMeeting = meeting
-                }
-                cancelGrace()
+                currentMeeting = detected
             }
-        } else if isDetectingMeeting {
-            // No meeting detected but was detecting — start grace period
+        } else if currentMeeting != nil {
             startGrace()
         }
     }
