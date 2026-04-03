@@ -13,6 +13,46 @@ enum NotificationManager {
                 logger.info("Notification auth granted: \(granted)")
             }
         }
+        registerCategories()
+    }
+
+    // MARK: - Meeting Detection Prompt
+
+    static let meetingDetectedCategory = "MEETING_DETECTED"
+    static let recordAction = "RECORD_ACTION"
+    static let dismissAction = "DISMISS_ACTION"
+
+    static func recordPromptCategory() -> UNNotificationCategory {
+        let record = UNNotificationAction(
+            identifier: recordAction,
+            title: "Record",
+            options: [.foreground]
+        )
+        let dismiss = UNNotificationAction(
+            identifier: dismissAction,
+            title: "Dismiss",
+            options: [.destructive]
+        )
+        return UNNotificationCategory(
+            identifier: meetingDetectedCategory,
+            actions: [record, dismiss],
+            intentIdentifiers: [],
+            options: []
+        )
+    }
+
+    static func promptToRecord(eventTitle: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Meeting Detected: \(eventTitle)"
+        content.body = "Your calendar event is in progress. Start recording?"
+        content.sound = .default
+        content.categoryIdentifier = meetingDetectedCategory
+        send(id: "meeting-prompt", content: content)
+    }
+
+    static func registerCategories() {
+        let center = UNUserNotificationCenter.current()
+        center.setNotificationCategories([recordPromptCategory()])
     }
 
     static func recordingStarted(title: String, mode: RecordingMode) {
