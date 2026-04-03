@@ -19,3 +19,7 @@ Package.resolved
 
 # ML Models (downloaded during build, ~711MB)
 Resources/Models/
+
+
+.history/
+.claude/worktrees/
