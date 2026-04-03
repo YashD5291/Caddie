@@ -181,22 +181,23 @@ extension MeetingDetector {
             let hasAudioProcess = active.contains { $0.source == .audioProcess }
             let hasMic = active.contains { $0.source == .micState }
             let hasWindowTitle = active.contains { $0.source == .windowTitle }
-            let hasCalendar = active.contains { $0.source == .calendar }
+            let hasCalendar = active.contains { $0.source == .googleCalendar }
 
             let confirmed = (hasAudioProcess && hasMic)
                          || (hasAudioProcess && hasWindowTitle)
                          || (hasMic && hasCalendar)
                          || (hasWindowTitle && hasCalendar)
+                         || (hasAudioProcess && hasCalendar)
 
             guard confirmed else { return nil }
 
-            let appName = active.compactMap(\.appName).first ?? "Unknown"
-            let calendarTitle = active.compactMap(\.calendarEvent).first
-            let windowTitle = active.compactMap(\.windowTitle).first
-            let title = calendarTitle ?? windowTitle ?? "\(appName) Meeting"
-            let pid = active.compactMap(\.processId).first
+            let app = active.first(where: { $0.appName != nil })?.appName ?? "Unknown"
+            let title = active.first(where: { $0.calendarEvent != nil })?.calendarEvent
+                     ?? active.first(where: { $0.windowTitle != nil })?.windowTitle
+                     ?? "\(app) Meeting"
+            let pid = active.first(where: { $0.processId != nil })?.processId
 
-            return DetectedMeeting(app: appName, title: title, processId: pid)
+            return DetectedMeeting(app: app, title: title, processId: pid)
         }
     }
 }

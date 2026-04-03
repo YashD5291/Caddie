@@ -101,7 +101,7 @@ final class CalendarMonitor: DetectionMonitor, @unchecked Sendable {
                 logger.info("Calendar event detected: \(title)")
                 lastEventTitle = title
                 onSignal?(DetectionSignal(
-                    source: .calendar,
+                    source: .googleCalendar,
                     appName: nil,
                     processId: nil,
                     windowTitle: nil,
@@ -113,7 +113,7 @@ final class CalendarMonitor: DetectionMonitor, @unchecked Sendable {
             logger.info("No active calendar event")
             lastEventTitle = nil
             onSignal?(DetectionSignal(
-                source: .calendar,
+                source: .googleCalendar,
                 appName: nil,
                 processId: nil,
                 windowTitle: nil,

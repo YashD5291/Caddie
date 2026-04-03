@@ -62,7 +62,7 @@ final class MeetingDetectorTests: XCTestCase {
                 isActive: true
             ),
             DetectionSignal(
-                source: .calendar,
+                source: .googleCalendar,
                 appName: nil,
                 processId: nil,
                 windowTitle: nil,
@@ -94,7 +94,7 @@ final class MeetingDetectorTests: XCTestCase {
                 isActive: true
             ),
             DetectionSignal(
-                source: .calendar,
+                source: .googleCalendar,
                 appName: nil,
                 processId: nil,
                 windowTitle: nil,
@@ -105,6 +105,27 @@ final class MeetingDetectorTests: XCTestCase {
         let result = engine.evaluate(signals: signals)
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.title, "Sprint Planning")
+    }
+
+    func testGoogleCalendarPlusOtherSignalProducesDetectedMeeting() {
+        let signals = [
+            DetectionSignal(source: .googleCalendar, appName: nil, processId: nil,
+                            windowTitle: nil, calendarEvent: "Sprint Planning", isActive: true),
+            DetectionSignal(source: .micState, appName: nil, processId: nil,
+                            windowTitle: nil, calendarEvent: nil, isActive: true),
+        ]
+        let result = engine.evaluate(signals: signals)
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.title, "Sprint Planning")
+    }
+
+    func testGoogleCalendarAloneDoesNotTrigger() {
+        let signals = [
+            DetectionSignal(source: .googleCalendar, appName: nil, processId: nil,
+                            windowTitle: nil, calendarEvent: "Solo Event", isActive: true),
+        ]
+        let result = engine.evaluate(signals: signals)
+        XCTAssertNil(result)
     }
 
     func testTitleFallback_appNameWhenNoOtherTitle() {

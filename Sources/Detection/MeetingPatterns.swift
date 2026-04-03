@@ -191,7 +191,7 @@ struct DetectionSignal {
         case audioProcess
         case micState
         case windowTitle
-        case calendar
+        case googleCalendar
     }
 }
 
