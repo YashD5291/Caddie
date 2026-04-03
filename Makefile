@@ -27,8 +27,7 @@ release: setup
 		-scheme Caddie \
 		-configuration Release \
 		-destination 'platform=macOS' \
-		-derivedDataPath build \
-		CODE_SIGN_IDENTITY="-"
+		-derivedDataPath build
 
 # Create DMG from release build
 dmg: release
