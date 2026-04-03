@@ -44,6 +44,8 @@ final class AppState {
     private(set) var authManager = GoogleAuthManager()
     private(set) var coordinator: RecordingCoordinator?
     var googleAuthState: GoogleAuthManager.AuthState = .signedOut
+    var todayEvents: [GoogleCalendarEvent] = []
+    private(set) var calendarService: GoogleCalendarService?
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AppState")
 
@@ -74,6 +76,19 @@ final class AppState {
             // Restore Google auth session from Keychain (AUTH-01)
             await authManager.restoreSession()
             googleAuthState = await authManager.state
+
+            // Start calendar service if signed in
+            if case .signedIn = googleAuthState {
+                let service = GoogleCalendarService(authManager: authManager)
+                await service.setCallbacks(
+                    onEventsUpdated: { [weak self] events in
+                        Task { @MainActor in self?.todayEvents = events }
+                    },
+                    onSignal: nil // Wired after coordinator is created
+                )
+                await service.start()
+                calendarService = service
+            }
 
             database = try AppDatabase()
             try AudioFileManager.ensureDirectoryExists()
@@ -165,9 +180,22 @@ final class AppState {
                 }
             }
 
-            // 7. Start detection AFTER pipeline exists -- fixes init race (REC-04)
+            // 7. Wire calendar-based meeting prompt to notification
+            await newCoordinator.setOnMeetingPrompt { title in
+                NotificationManager.promptToRecord(eventTitle: title)
+            }
+
+            // 8. Start detection AFTER pipeline exists -- fixes init race (REC-04)
             await newCoordinator.start()
             coordinator = newCoordinator
+
+            // 9. Wire calendar service signal to detector via coordinator
+            if let service = calendarService {
+                nonisolated(unsafe) let coord = newCoordinator
+                await service.setOnSignal { signal in
+                    Task { await coord.forwardSignal(signal) }
+                }
+            }
 
             isInitialized = true
             logger.info("AppState initialized with RecordingCoordinator")
@@ -202,6 +230,25 @@ final class AppState {
             do {
                 try await authManager.signIn()
                 googleAuthState = await authManager.state
+                if case .signedIn = googleAuthState, calendarService == nil {
+                    let service = GoogleCalendarService(authManager: authManager)
+                    await service.setCallbacks(
+                        onEventsUpdated: { [weak self] events in
+                            Task { @MainActor in self?.todayEvents = events }
+                        },
+                        onSignal: nil
+                    )
+                    await service.start()
+                    calendarService = service
+
+                    // Wire calendar signal to detector if coordinator exists
+                    if let coord = coordinator {
+                        nonisolated(unsafe) let c = coord
+                        await service.setOnSignal { signal in
+                            Task { await c.forwardSignal(signal) }
+                        }
+                    }
+                }
             } catch {
                 CaddieLogger.auth.error("Google sign-in failed: \(error.localizedDescription)")
                 googleAuthState = await authManager.state
@@ -218,6 +265,9 @@ final class AppState {
 
     func signOutFromGoogle() {
         Task {
+            await calendarService?.stop()
+            calendarService = nil
+            todayEvents = []
             await authManager.signOut()
             googleAuthState = await authManager.state
         }

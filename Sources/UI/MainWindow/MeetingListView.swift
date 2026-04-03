@@ -4,23 +4,38 @@ struct MeetingListView: View {
     let meetings: [Meeting]
     @Binding var selectedMeetingId: Int64?
     @Binding var searchText: String
+    @Environment(AppState.self) private var appState
 
     var body: some View {
         List(selection: $selectedMeetingId) {
-            if groupedMeetings.isEmpty {
+            if case .signedIn = appState.googleAuthState {
+                Section {
+                    TodayScheduleView(events: appState.todayEvents)
+                } header: {
+                    HStack {
+                        Text("Today's Schedule")
+                        Spacer()
+                        if !appState.todayEvents.isEmpty {
+                            Text("\(appState.todayEvents.count) events")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+
+            if meetings.isEmpty {
                 emptyState
             } else {
-                ForEach(groupedMeetings, id: \.date) { group in
-                    Section {
-                        ForEach(group.meetings) { meeting in
-                            MeetingRow(meeting: meeting)
-                                .tag(meeting.id)
-                                .listRowSeparator(.hidden)
+                Section("Recordings") {
+                    ForEach(groupedMeetings, id: \.date) { group in
+                        Section(Formatters.dateLabel(from: group.date)) {
+                            ForEach(group.meetings) { meeting in
+                                MeetingRow(meeting: meeting)
+                                    .tag(meeting.id)
+                                    .listRowSeparator(.hidden)
+                            }
                         }
-                    } header: {
-                        Text(Formatters.dateLabel(from: group.date))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
                     }
                 }
             }

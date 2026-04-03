@@ -10,11 +10,25 @@ actor GoogleCalendarService {
     private var dismissedEventIDs: Set<String> = []
     private var lastActiveEventID: String?
 
-    var onEventsUpdated: (([GoogleCalendarEvent]) -> Void)?
-    var onSignal: ((DetectionSignal) -> Void)?
+    var onEventsUpdated: (@Sendable ([GoogleCalendarEvent]) -> Void)?
+    var onSignal: (@Sendable (DetectionSignal) -> Void)?
 
     init(authManager: GoogleAuthManager) {
         self.authManager = authManager
+    }
+
+    // MARK: - Configuration
+
+    func setCallbacks(
+        onEventsUpdated: (@Sendable ([GoogleCalendarEvent]) -> Void)?,
+        onSignal: (@Sendable (DetectionSignal) -> Void)?
+    ) {
+        self.onEventsUpdated = onEventsUpdated
+        self.onSignal = onSignal
+    }
+
+    func setOnSignal(_ callback: (@Sendable (DetectionSignal) -> Void)?) {
+        self.onSignal = callback
     }
 
     // MARK: - Lifecycle
