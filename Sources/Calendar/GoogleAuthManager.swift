@@ -238,24 +238,35 @@ actor GoogleAuthManager {
 
     // MARK: - Private Helpers
 
+    private static func formEncode(_ params: [String: String]) -> Data {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        return params
+            .map { key, value in
+                let k = key.addingPercentEncoding(withAllowedCharacters: allowed) ?? key
+                let v = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+                return "\(k)=\(v)"
+            }
+            .joined(separator: "&")
+            .data(using: .utf8)!
+    }
+
     private func exchangeCodeForTokens(code: String, verifier: String) async throws -> TokenResponse {
         var request = URLRequest(url: URL(string: GoogleOAuthConfig.tokenURL)!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
-        let body = [
+        request.httpBody = Self.formEncode([
             "client_id": GoogleOAuthConfig.clientID,
             "code": code,
             "code_verifier": verifier,
             "grant_type": "authorization_code",
             "redirect_uri": GoogleOAuthConfig.redirectURI,
-        ]
-        request.httpBody = body.map { "\($0.key)=\($0.value)" }
-            .joined(separator: "&")
-            .data(using: .utf8)
+        ])
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let errorBody = String(data: data, encoding: .utf8) ?? "no body"
+            logger.error("Token exchange failed: \(errorBody)")
             throw GoogleAuthError.tokenExchangeFailed
         }
         return try JSONDecoder().decode(TokenResponse.self, from: data)
@@ -266,17 +277,16 @@ actor GoogleAuthManager {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
-        let body = [
+        request.httpBody = Self.formEncode([
             "client_id": GoogleOAuthConfig.clientID,
             "refresh_token": refreshToken,
             "grant_type": "refresh_token",
-        ]
-        request.httpBody = body.map { "\($0.key)=\($0.value)" }
-            .joined(separator: "&")
-            .data(using: .utf8)
+        ])
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let errorBody = String(data: data, encoding: .utf8) ?? "no body"
+            logger.error("Token refresh failed: \(errorBody)")
             // Refresh failed — assume token revoked, force re-auth
             accessToken = nil
             self.refreshToken = nil
