@@ -25,6 +25,7 @@ final class AppState {
     var currentMeetingTitle: String?
     var recordingStartTime: Date?
     var transcriptionProgress: Double = 0
+    var hasOpenedMainWindow = false
     var hasCompletedOnboarding: Bool {
         get { UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") }
         set { UserDefaults.standard.set(newValue, forKey: "hasCompletedOnboarding") }

@@ -4,15 +4,26 @@ import SwiftUI
 struct CaddieApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
+    @Environment(\.openWindow) private var openWindow
 
     init() {
         appDelegate.appState = appState
+        appDelegate.openWindowAction = openWindow
     }
 
     var body: some Scene {
         MenuBarExtra {
             MenuBarView()
                 .environment(appState)
+                .onAppear {
+                    // MenuBarExtra is created at launch — use this to open the main window.
+                    // SwiftUI Window scenes are lazy and won't auto-show alongside MenuBarExtra.
+                    if !appState.hasOpenedMainWindow {
+                        appState.hasOpenedMainWindow = true
+                        openWindow(id: "main")
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
+                }
         } label: {
             switch appState.status {
             case .idle:
@@ -51,14 +62,12 @@ struct CaddieApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var appState: AppState?
+    var openWindowAction: OpenWindowAction?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         CaddieLogger.app.info("Caddie launched")
         NotificationManager.requestAuthorization()
 
-        // LSUIElement=false means the app launches as a regular app with
-        // window, dock icon, and menu bar. We observe window lifecycle to
-        // switch to accessory mode when all windows close.
         NotificationCenter.default.addObserver(
             self, selector: #selector(windowDidBecomeKey(_:)),
             name: NSWindow.didBecomeKeyNotification, object: nil
@@ -78,7 +87,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag {
             NSApp.setActivationPolicy(.regular)
-            Self.findMainWindow()?.makeKeyAndOrderFront(nil)
+            // Try existing window first, fall back to SwiftUI openWindow
+            if let window = Self.findMainWindow() {
+                window.makeKeyAndOrderFront(nil)
+            } else {
+                openWindowAction?(id: "main")
+            }
+            NSApp.activate(ignoringOtherApps: true)
         }
         return true
     }
@@ -122,7 +137,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Window Identification
 
     private static func isMainAppWindow(_ window: NSWindow) -> Bool {
-        // Match by SwiftUI Window identifier when available, fall back to title
         if let identifier = window.identifier?.rawValue, identifier.contains("main") {
             return true
         }
