@@ -126,6 +126,16 @@ actor RecordingCoordinator {
         await handle(.manualStop)
     }
 
+    /// Set a callback for calendar-based meeting prompts on the detector.
+    func setOnMeetingPrompt(_ callback: (@Sendable (String) -> Void)?) {
+        detector.onMeetingPrompt = callback
+    }
+
+    /// Forward an external detection signal (e.g., Google Calendar) to the detector.
+    func forwardSignal(_ signal: DetectionSignal) {
+        detector.handleSignal(signal)
+    }
+
     // MARK: - Precondition Checks
 
     private static let minimumDiskSpaceBytes: Int64 = 500 * 1024 * 1024  // 500 MB

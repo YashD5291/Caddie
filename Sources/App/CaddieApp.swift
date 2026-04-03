@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct CaddieApp: App {
@@ -60,12 +61,13 @@ struct CaddieApp: App {
 // MARK: - AppDelegate
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var appState: AppState?
     var openWindowAction: OpenWindowAction?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         CaddieLogger.app.info("Caddie launched")
+        UNUserNotificationCenter.current().delegate = self
         NotificationManager.requestAuthorization()
 
         NotificationCenter.default.addObserver(
@@ -132,6 +134,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.setActivationPolicy(.accessory)
             }
         }
+    }
+
+    // MARK: - Notification Handling
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        switch response.actionIdentifier {
+        case NotificationManager.recordAction:
+            let title = response.notification.request.content.title
+                .replacingOccurrences(of: "Meeting Detected: ", with: "")
+            await MainActor.run {
+                appState?.currentMeetingTitle = title
+                appState?.startManualRecording()
+            }
+        case NotificationManager.dismissAction:
+            break
+        default:
+            break
+        }
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 
     // MARK: - Window Identification
