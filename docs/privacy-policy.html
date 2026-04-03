@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caddie - Privacy Policy</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            line-height: 1.6;
+            color: #1d1d1f;
+            background: #fff;
+        }
+        h1 { font-size: 2em; margin-bottom: 0.2em; }
+        h2 { margin-top: 2em; font-size: 1.3em; }
+        .subtitle { color: #6e6e73; margin-bottom: 2em; }
+        ul { padding-left: 1.5em; }
+        li { margin-bottom: 0.5em; }
+        .updated { color: #6e6e73; font-size: 0.9em; margin-top: 3em; }
+    </style>
+</head>
+<body>
+    <h1>Caddie Privacy Policy</h1>
+    <p class="subtitle">Your meetings, your Mac, your data.</p>
+
+    <h2>Summary</h2>
+    <p>Caddie is a macOS application that records and transcribes meetings entirely on your device. We do not collect, store, or transmit your personal data to any server. All audio recordings, transcripts, and meeting data remain on your Mac.</p>
+
+    <h2>What Data Caddie Accesses</h2>
+    <ul>
+        <li><strong>Microphone audio</strong> — recorded locally during meetings for transcription</li>
+        <li><strong>System audio</strong> — captured locally to record other meeting participants</li>
+        <li><strong>Window titles</strong> — read via macOS Accessibility to detect active meeting apps</li>
+        <li><strong>Google Calendar events</strong> (optional) — read-only access to event titles, times, and attendees to auto-detect scheduled meetings</li>
+    </ul>
+
+    <h2>Google Calendar Integration</h2>
+    <p>If you choose to connect your Google account, Caddie requests read-only access to your Google Calendar events (<code>calendar.events.readonly</code> scope). This is used solely to:</p>
+    <ul>
+        <li>Detect upcoming meetings and prompt you before they start</li>
+        <li>Display meeting titles and attendee names alongside recordings</li>
+    </ul>
+    <p>Caddie does <strong>not</strong> modify, create, or delete any calendar events. Calendar data is cached in memory only and is not written to disk or sent to any server.</p>
+
+    <h2>What Caddie Does NOT Do</h2>
+    <ul>
+        <li>Does not upload audio, transcripts, or any data to any server</li>
+        <li>Does not use analytics, telemetry, or crash reporting services</li>
+        <li>Does not share data with third parties</li>
+        <li>Does not use cookies or tracking technologies</li>
+        <li>Does not store data in the cloud</li>
+    </ul>
+
+    <h2>Data Storage</h2>
+    <p>All data is stored locally on your Mac in:</p>
+    <ul>
+        <li><strong>Audio recordings</strong> — <code>~/Library/Application Support/Caddie/</code></li>
+        <li><strong>Meeting database</strong> — local SQLite file in the same directory</li>
+        <li><strong>Google OAuth tokens</strong> — stored in the macOS Keychain (encrypted by the OS)</li>
+        <li><strong>Preferences</strong> — macOS UserDefaults (launch at login, audio device selection)</li>
+    </ul>
+    <p>You can delete all data at any time by removing the Caddie application and its Application Support folder.</p>
+
+    <h2>Network Connections</h2>
+    <p>Caddie only makes network requests for:</p>
+    <ul>
+        <li><strong>Google OAuth</strong> — to authenticate your Google account (if you opt in)</li>
+        <li><strong>Google Calendar API</strong> — to read calendar events (if you opt in)</li>
+        <li><strong>Sparkle updates</strong> — to check for app updates</li>
+    </ul>
+    <p>No audio, transcripts, or personal data is ever transmitted over the network.</p>
+
+    <h2>Third-Party Services</h2>
+    <p>Caddie uses Google's OAuth 2.0 and Calendar API. Google's use of your data is governed by <a href="https://policies.google.com/privacy">Google's Privacy Policy</a>. Caddie's access is limited to the <code>calendar.events.readonly</code> scope and your email address for display purposes.</p>
+
+    <h2>Children's Privacy</h2>
+    <p>Caddie is not directed at children under 13. We do not knowingly collect personal information from children.</p>
+
+    <h2>Changes to This Policy</h2>
+    <p>We may update this privacy policy from time to time. Changes will be posted on this page with an updated revision date.</p>
+
+    <h2>Contact</h2>
+    <p>If you have questions about this privacy policy, contact us at the <a href="https://github.com/YashD5291/Caddie/issues">Caddie GitHub repository</a>.</p>
+
+    <p class="updated">Last updated: April 2, 2026</p>
+</body>
+</html>
