@@ -22,7 +22,7 @@ struct ContentView: View {
             }
         }
         .task {
-            await appState.initialize()
+            await appState.ensureInitialized()
         }
     }
 
@@ -36,7 +36,7 @@ struct ContentView: View {
         } actions: {
             Button("Retry") {
                 appState.initError = nil
-                Task { await appState.initialize() }
+                appState.retryInitialization()
             }
             .buttonStyle(.borderedProminent)
         }

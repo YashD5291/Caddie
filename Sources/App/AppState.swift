@@ -49,9 +49,25 @@ final class AppState {
     var isInitialized = false
     var initError: String?
 
+    /// Internal task that survives view lifecycle cancellation.
+    private var initTask: Task<Void, Never>?
+
     // MARK: - Lifecycle
 
-    func initialize() async {
+    /// Called from ContentView.task — delegates to a long-lived Task
+    /// so initialization can't be cancelled by SwiftUI view lifecycle.
+    func ensureInitialized() async {
+        if initTask == nil {
+            initTask = Task { await initialize() }
+        }
+        await initTask?.value
+    }
+
+    func retryInitialization() {
+        initTask = Task { await initialize() }
+    }
+
+    private func initialize() async {
         guard !isInitialized else { return }
         do {
             // Restore Google auth session from Keychain (AUTH-01)
