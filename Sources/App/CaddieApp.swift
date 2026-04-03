@@ -56,13 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CaddieLogger.app.info("Caddie launched")
         NotificationManager.requestAuthorization()
 
-        // Open main window on launch so the app behaves like a standard macOS app
-        DispatchQueue.main.async {
-            NSApp.setActivationPolicy(.regular)
-            Self.findMainWindow()?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-        }
-
+        // LSUIElement=false means the app launches as a regular app with
+        // window, dock icon, and menu bar. We observe window lifecycle to
+        // switch to accessory mode when all windows close.
         NotificationCenter.default.addObserver(
             self, selector: #selector(windowDidBecomeKey(_:)),
             name: NSWindow.didBecomeKeyNotification, object: nil
