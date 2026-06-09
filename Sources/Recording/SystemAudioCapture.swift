@@ -1,4 +1,5 @@
 import AudioToolbox
+import AVFoundation
 import CoreAudio
 import Foundation
 import os
@@ -25,6 +26,29 @@ final class SystemAudioCapture {
     fileprivate final class RenderContext {
         var audioUnit: AudioComponentInstance?
         var onBuffer: BufferCallback?
+        // Conversion path: HALOutput silently delivers native rate despite our format
+        // request, so we accept native pass-through and convert ourselves.
+        var converter: AVAudioConverter?
+        var nativeFormat: AVAudioFormat?
+        var targetFormat: AVAudioFormat?
+        // Preallocated buffers reused on the realtime thread to avoid per-callback
+        // heap allocation. Oversized slices fall back to a one-off allocation.
+        let maxFrames: AVAudioFrameCount = 4096
+        var inputPCM: AVAudioPCMBuffer?
+        var outputPCM: AVAudioPCMBuffer?
+    }
+
+    /// Output buffer capacity needed to hold `inputFrames` resampled from
+    /// `inputSampleRate` to `outputSampleRate`. Pure sizing math shared by both
+    /// render callbacks (and unit-tested); the `+ 1` guards against rounding-down
+    /// losing the final partial frame.
+    static func outputCapacity(
+        forInputFrames inputFrames: AVAudioFrameCount,
+        inputSampleRate: Double,
+        outputSampleRate: Double
+    ) -> AVAudioFrameCount {
+        let ratio = outputSampleRate / inputSampleRate
+        return AVAudioFrameCount(Double(inputFrames) * ratio) + 1
     }
 
     /// Called when the aggregate device dies (e.g., hardware disconnected mid-recording).
@@ -95,6 +119,53 @@ final class SystemAudioCapture {
         if removedCount > 0 {
             systemAudioCaptureLogger.info("Cleaned up \(removedCount) stale aggregate device(s)")
         }
+    }
+
+    // MARK: - Format Conversion Helper
+
+    /// Build an `AVAudioConverter` from a CoreAudio native format to 16kHz mono Int16.
+    /// Used because `kAudioUnitSubType_HALOutput` silently delivers samples at the device's
+    /// native rate even when we request 16kHz on the output scope, so we convert ourselves
+    /// after rendering at native rate.
+    static func makeDownsamplingConverter(
+        from nativeASBD: AudioStreamBasicDescription,
+        toSampleRate target: Double
+    ) -> (converter: AVAudioConverter, nativeFormat: AVAudioFormat, targetFormat: AVAudioFormat)? {
+        var asbd = nativeASBD
+        // AVAudioFormat(streamDescription:) returns nil when mChannelsPerFrame > 2 —
+        // it demands an explicit channel layout. Build a Discrete-In-Order layout
+        // so devices with arbitrary channel counts (multi-track virtual drivers
+        // like Jump Audio's 8-channel output) can still create a converter.
+        let nativeFormat: AVAudioFormat?
+        if asbd.mChannelsPerFrame > 2 {
+            var layout = AudioChannelLayout()
+            layout.mChannelLayoutTag = kAudioChannelLayoutTag_DiscreteInOrder | UInt32(asbd.mChannelsPerFrame)
+            let avLayout = AVAudioChannelLayout(layout: &layout)
+            nativeFormat = AVAudioFormat(streamDescription: &asbd, channelLayout: avLayout)
+        } else {
+            nativeFormat = AVAudioFormat(streamDescription: &asbd)
+        }
+        guard let nativeFormat else { return nil }
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: target,
+            channels: 1,
+            interleaved: true
+        ) else { return nil }
+        guard let converter = AVAudioConverter(from: nativeFormat, to: targetFormat) else { return nil }
+        return (converter, nativeFormat, targetFormat)
+    }
+
+    /// Preallocate the reusable input/output PCM buffers on `context` so the realtime
+    /// render callback never allocates on the happy path.
+    private func preallocateBuffers(on context: RenderContext, nativeFormat: AVAudioFormat, targetFormat: AVAudioFormat) {
+        context.inputPCM = AVAudioPCMBuffer(pcmFormat: nativeFormat, frameCapacity: context.maxFrames)
+        let outCapacity = Self.outputCapacity(
+            forInputFrames: context.maxFrames,
+            inputSampleRate: nativeFormat.sampleRate,
+            outputSampleRate: targetFormat.sampleRate
+        )
+        context.outputPCM = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outCapacity)
     }
 
     /// Start capturing system audio.
@@ -412,38 +483,51 @@ final class SystemAudioCapture {
             throw CaptureError.failedToSetDevice(status)
         }
 
-        // Configure output format on the audio unit (what we receive in the callback):
-        // 16kHz, mono, 16-bit signed integer PCM
-        var outputFormat = AudioStreamBasicDescription(
-            mSampleRate: Self.targetSampleRate,
-            mFormatID: kAudioFormatLinearPCM,
-            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
-            mBytesPerPacket: 2,
-            mFramesPerPacket: 1,
-            mBytesPerFrame: 2,
-            mChannelsPerFrame: 1,
-            mBitsPerChannel: 16,
-            mReserved: 0
+        // HALOutput silently ignores 16kHz format requests on aggregate-device-with-tap input,
+        // delivering at the device's native rate (typically 48kHz). Match the device's native
+        // format on the output scope so HALOutput does no SRC, then convert to 16kHz Int16
+        // ourselves in the render callback.
+        var nativeFormat = AudioStreamBasicDescription()
+        var formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        status = AudioUnitGetProperty(
+            audioUnit,
+            kAudioUnitProperty_StreamFormat,
+            kAudioUnitScope_Input,
+            1,
+            &nativeFormat,
+            &formatSize
         )
+        guard status == noErr else {
+            throw CaptureError.failedToGetFormat(status)
+        }
+        logger.info("System audio native format: \(nativeFormat.mSampleRate)Hz, \(nativeFormat.mChannelsPerFrame)ch")
 
         status = AudioUnitSetProperty(
             audioUnit,
             kAudioUnitProperty_StreamFormat,
             kAudioUnitScope_Output,
-            1, // input bus output scope = what we pull from it
-            &outputFormat,
+            1,
+            &nativeFormat,
             UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         )
         guard status == noErr else {
             throw CaptureError.failedToSetFormat(status)
         }
 
+        guard let conv = Self.makeDownsamplingConverter(from: nativeFormat, toSampleRate: Self.targetSampleRate) else {
+            throw CaptureError.failedToCreateConverter
+        }
+
         // Set the render callback via a retained context object.
-        // The context holds references the callback needs (audioUnit, onBuffer),
+        // The context holds references the callback needs (audioUnit, onBuffer, converter, formats),
         // avoiding Unmanaged.passUnretained(self) which risks use-after-free.
         let context = RenderContext()
         context.audioUnit = audioUnit
         context.onBuffer = onBuffer
+        context.converter = conv.converter
+        context.nativeFormat = conv.nativeFormat
+        context.targetFormat = conv.targetFormat
+        preallocateBuffers(on: context, nativeFormat: conv.nativeFormat, targetFormat: conv.targetFormat)
         self.renderContext = context
 
         var callbackStruct = AURenderCallbackStruct(
@@ -627,35 +711,47 @@ final class SystemAudioCapture {
             throw CaptureError.failedToSetDevice(status)
         }
 
-        // Step 5: Set output format on bus 1 output scope to 16kHz mono Int16
-        var outputFormat = AudioStreamBasicDescription(
-            mSampleRate: Self.targetSampleRate,
-            mFormatID: kAudioFormatLinearPCM,
-            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
-            mBytesPerPacket: 2,
-            mFramesPerPacket: 1,
-            mBytesPerFrame: 2,
-            mChannelsPerFrame: 1,
-            mBitsPerChannel: 16,
-            mReserved: 0
+        // Step 5: Read native input format and pass it through on the output scope —
+        // see comment in setupAudioUnit() for why we don't ask HALOutput to do SRC.
+        var nativeFormat = AudioStreamBasicDescription()
+        var formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        status = AudioUnitGetProperty(
+            audioUnit,
+            kAudioUnitProperty_StreamFormat,
+            kAudioUnitScope_Input,
+            1,
+            &nativeFormat,
+            &formatSize
         )
+        guard status == noErr else {
+            throw CaptureError.failedToGetFormat(status)
+        }
+        logger.info("Direct device native format: \(nativeFormat.mSampleRate)Hz, \(nativeFormat.mChannelsPerFrame)ch")
 
         status = AudioUnitSetProperty(
             audioUnit,
             kAudioUnitProperty_StreamFormat,
             kAudioUnitScope_Output,
             1,
-            &outputFormat,
+            &nativeFormat,
             UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         )
         guard status == noErr else {
             throw CaptureError.failedToSetFormat(status)
         }
 
+        guard let conv = Self.makeDownsamplingConverter(from: nativeFormat, toSampleRate: Self.targetSampleRate) else {
+            throw CaptureError.failedToCreateConverter
+        }
+
         // Step 6: Set render callback via retained context object
         let context = RenderContext()
         context.audioUnit = audioUnit
         context.onBuffer = onBuffer
+        context.converter = conv.converter
+        context.nativeFormat = conv.nativeFormat
+        context.targetFormat = conv.targetFormat
+        preallocateBuffers(on: context, nativeFormat: conv.nativeFormat, targetFormat: conv.targetFormat)
         self.renderContext = context
 
         var callbackStruct = AURenderCallbackStruct(
@@ -745,7 +841,9 @@ final class SystemAudioCapture {
         case failedToCreateAudioUnit(OSStatus)
         case failedToConfigureAudioUnit(OSStatus)
         case failedToSetDevice(OSStatus)
+        case failedToGetFormat(OSStatus)
         case failedToSetFormat(OSStatus)
+        case failedToCreateConverter
         case failedToSetCallback(OSStatus)
         case failedToInitializeAudioUnit(OSStatus)
         case failedToStartAudioUnit(OSStatus)
@@ -762,7 +860,9 @@ final class SystemAudioCapture {
             case .failedToCreateAudioUnit(let s): return "Failed to create AudioUnit (OSStatus \(s))"
             case .failedToConfigureAudioUnit(let s): return "Failed to configure AudioUnit (OSStatus \(s))"
             case .failedToSetDevice(let s): return "Failed to set audio device (OSStatus \(s))"
+            case .failedToGetFormat(let s): return "Failed to read stream format (OSStatus \(s))"
             case .failedToSetFormat(let s): return "Failed to set stream format (OSStatus \(s))"
+            case .failedToCreateConverter: return "Failed to create audio format converter for system audio"
             case .failedToSetCallback(let s): return "Failed to set render callback (OSStatus \(s))"
             case .failedToInitializeAudioUnit(let s): return "Failed to initialize AudioUnit (OSStatus \(s))"
             case .failedToStartAudioUnit(let s): return "Failed to start AudioUnit (OSStatus \(s))"
@@ -808,8 +908,8 @@ private func deviceAliveListener(
 // MARK: - Render Callback (free function)
 
 /// The render callback is invoked by the AudioUnit on the real-time audio thread.
-/// It pulls samples from the input device (aggregate or direct) and forwards
-/// them as Int16 buffers to the Swift callback.
+/// It pulls samples at the device's native format (HALOutput won't do SRC honestly),
+/// runs them through an `AVAudioConverter` to 16kHz mono Int16, and forwards them.
 ///
 /// Uses a retained RenderContext instead of Unmanaged<SystemAudioCapture> to avoid
 /// use-after-free when SystemAudioCapture is deallocated during an in-flight callback.
@@ -823,21 +923,23 @@ private func systemAudioRenderCallback(
 ) -> OSStatus {
     let context = Unmanaged<SystemAudioCapture.RenderContext>.fromOpaque(inRefCon).takeUnretainedValue()
 
-    guard let unit = context.audioUnit else { return noErr }
+    guard let unit = context.audioUnit,
+          let converter = context.converter,
+          let nativeFormat = context.nativeFormat,
+          let targetFormat = context.targetFormat else { return noErr }
 
-    // Allocate a buffer for the rendered data
-    let byteSize = Int(inNumberFrames) * MemoryLayout<Int16>.size
-    let buffer = UnsafeMutablePointer<Int16>.allocate(capacity: Int(inNumberFrames))
-    defer { buffer.deallocate() }
-
-    var bufferList = AudioBufferList(
-        mNumberBuffers: 1,
-        mBuffers: AudioBuffer(
-            mNumberChannels: 1,
-            mDataByteSize: UInt32(byteSize),
-            mData: buffer
-        )
-    )
+    // Reuse the preallocated input buffer; fall back to a one-off allocation only if
+    // this slice exceeds the preallocated capacity (never drop audio).
+    let inputPCM: AVAudioPCMBuffer
+    if let preallocated = context.inputPCM, inNumberFrames <= preallocated.frameCapacity {
+        inputPCM = preallocated
+    } else {
+        guard let fallback = AVAudioPCMBuffer(pcmFormat: nativeFormat, frameCapacity: inNumberFrames) else {
+            return noErr
+        }
+        inputPCM = fallback
+    }
+    inputPCM.frameLength = inNumberFrames
 
     let status = AudioUnitRender(
         unit,
@@ -845,14 +947,46 @@ private func systemAudioRenderCallback(
         inTimeStamp,
         1, // input bus
         inNumberFrames,
-        &bufferList
+        inputPCM.mutableAudioBufferList
     )
-
     guard status == noErr else { return status }
 
-    // Forward the Int16 samples to the callback
-    let sampleCount = Int(inNumberFrames)
-    let bufferPtr = UnsafeBufferPointer(start: buffer, count: sampleCount)
+    let outputCapacity = SystemAudioCapture.outputCapacity(
+        forInputFrames: inNumberFrames,
+        inputSampleRate: nativeFormat.sampleRate,
+        outputSampleRate: targetFormat.sampleRate
+    )
+    let outputPCM: AVAudioPCMBuffer
+    if let preallocated = context.outputPCM, outputCapacity <= preallocated.frameCapacity {
+        outputPCM = preallocated
+        outputPCM.frameLength = 0
+    } else {
+        guard let fallback = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputCapacity) else {
+            return noErr
+        }
+        outputPCM = fallback
+    }
+
+    var convertError: NSError?
+    var hasInput = false
+    converter.convert(to: outputPCM, error: &convertError) { _, outStatus in
+        if hasInput {
+            outStatus.pointee = .noDataNow
+            return nil
+        }
+        hasInput = true
+        outStatus.pointee = .haveData
+        return inputPCM
+    }
+
+    guard convertError == nil,
+          outputPCM.frameLength > 0,
+          let int16Data = outputPCM.int16ChannelData else {
+        return noErr
+    }
+
+    let sampleCount = Int(outputPCM.frameLength)
+    let bufferPtr = UnsafeBufferPointer(start: int16Data[0], count: sampleCount)
     context.onBuffer?(bufferPtr, sampleCount)
 
     return noErr

@@ -21,6 +21,17 @@ final class MicrophoneCapture {
     fileprivate final class RenderContext {
         var audioUnit: AudioComponentInstance?
         var onBuffer: BufferCallback?
+        // HALOutput delivers samples at the device's native rate. We render at native
+        // and convert to 16 kHz Int16 in the callback.
+        var converter: AVAudioConverter?
+        var nativeFormat: AVAudioFormat?
+        var targetFormat: AVAudioFormat?
+        // Preallocated buffers reused on the realtime thread to avoid per-callback
+        // heap allocation. Sized for the expected maximum slice; oversized slices
+        // fall back to a one-off allocation rather than dropping audio.
+        let maxFrames: AVAudioFrameCount = 4096
+        var inputPCM: AVAudioPCMBuffer?
+        var outputPCM: AVAudioPCMBuffer?
     }
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "MicrophoneCapture")
@@ -125,7 +136,7 @@ final class MicrophoneCapture {
             isRunning = true
             logger.info("Microphone capture started via HAL AudioUnit (device: \(deviceUID))")
         } catch {
-            logger.error("Failed to start HAL microphone capture: \(error.localizedDescription)")
+            logger.error("Failed to start HAL microphone capture for device '\(deviceUID)': \(error.localizedDescription) (\(String(describing: error)))")
             cleanupHAL()
             throw error
         }
@@ -236,9 +247,13 @@ final class MicrophoneCapture {
     }
 
     /// Set up a HAL Output AudioUnit for the given device following TN2091 order.
-    /// Order: enable IO -> set device -> set format -> set callback -> initialize
+    /// Order: enable IO -> set device -> set format -> set callback -> initialize.
+    ///
+    /// Uses `HALOutput` (not `VoiceProcessingIO`) so any input device works — virtual /
+    /// loopback / aggregate devices cannot host VPIO's internal echo-cancel aggregate.
+    /// We accept HALOutput's native-rate delivery and run our own `AVAudioConverter` in
+    /// the render callback.
     private func setupHALAudioUnit(deviceID: AudioDeviceID) throws {
-        // Step 1: Find HAL Output component
         var desc = AudioComponentDescription(
             componentType: kAudioUnitType_Output,
             componentSubType: kAudioUnitSubType_HALOutput,
@@ -300,35 +315,57 @@ final class MicrophoneCapture {
             throw CaptureError.failedToSetDevice(status)
         }
 
-        // Step 5: Set output format on bus 1 output scope to 16kHz mono Int16
-        var outputFormat = AudioStreamBasicDescription(
-            mSampleRate: Self.targetSampleRate,
-            mFormatID: kAudioFormatLinearPCM,
-            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
-            mBytesPerPacket: 2,
-            mFramesPerPacket: 1,
-            mBytesPerFrame: 2,
-            mChannelsPerFrame: 1,
-            mBitsPerChannel: 16,
-            mReserved: 0
+        // Step 5: Read native input format and pass it through on the output scope.
+        // HALOutput won't honestly down-convert (see comment at top of setupHALAudioUnit),
+        // so we accept native and convert ourselves with AVAudioConverter.
+        var nativeFormat = AudioStreamBasicDescription()
+        var formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        status = AudioUnitGetProperty(
+            audioUnit,
+            kAudioUnitProperty_StreamFormat,
+            kAudioUnitScope_Input,
+            1,
+            &nativeFormat,
+            &formatSize
         )
+        guard status == noErr else {
+            throw CaptureError.failedToConfigureAudioUnit(status)
+        }
+        logger.info("Mic native format: \(nativeFormat.mSampleRate)Hz, \(nativeFormat.mChannelsPerFrame)ch")
 
         status = AudioUnitSetProperty(
             audioUnit,
             kAudioUnitProperty_StreamFormat,
             kAudioUnitScope_Output,
             1,
-            &outputFormat,
+            &nativeFormat,
             UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         )
         guard status == noErr else {
             throw CaptureError.failedToSetFormat(status)
         }
 
+        guard let conv = SystemAudioCapture.makeDownsamplingConverter(
+            from: nativeFormat,
+            toSampleRate: Self.targetSampleRate
+        ) else {
+            throw CaptureError.failedToCreateConverter
+        }
+
         // Step 6: Set render callback via retained context object
         let context = RenderContext()
         context.audioUnit = audioUnit
         context.onBuffer = onBuffer
+        context.converter = conv.converter
+        context.nativeFormat = conv.nativeFormat
+        context.targetFormat = conv.targetFormat
+        context.inputPCM = AVAudioPCMBuffer(pcmFormat: conv.nativeFormat, frameCapacity: context.maxFrames)
+        let outCapacity = SystemAudioCapture.outputCapacity(
+            forInputFrames: context.maxFrames,
+            inputSampleRate: conv.nativeFormat.sampleRate,
+            outputSampleRate: conv.targetFormat.sampleRate
+        )
+        context.outputPCM = AVAudioPCMBuffer(pcmFormat: conv.targetFormat, frameCapacity: outCapacity)
         self.renderContext = context
 
         var callbackStruct = AURenderCallbackStruct(
@@ -433,21 +470,23 @@ private func microphoneRenderCallback(
 ) -> OSStatus {
     let context = Unmanaged<MicrophoneCapture.RenderContext>.fromOpaque(inRefCon).takeUnretainedValue()
 
-    guard let unit = context.audioUnit else { return noErr }
+    guard let unit = context.audioUnit,
+          let converter = context.converter,
+          let nativeFormat = context.nativeFormat,
+          let targetFormat = context.targetFormat else { return noErr }
 
-    // Allocate a buffer for the rendered data
-    let byteSize = Int(inNumberFrames) * MemoryLayout<Int16>.size
-    let buffer = UnsafeMutablePointer<Int16>.allocate(capacity: Int(inNumberFrames))
-    defer { buffer.deallocate() }
-
-    var bufferList = AudioBufferList(
-        mNumberBuffers: 1,
-        mBuffers: AudioBuffer(
-            mNumberChannels: 1,
-            mDataByteSize: UInt32(byteSize),
-            mData: buffer
-        )
-    )
+    // Reuse the preallocated input buffer; fall back to a one-off allocation only if
+    // this slice exceeds the preallocated capacity (never drop audio).
+    let inputPCM: AVAudioPCMBuffer
+    if let preallocated = context.inputPCM, inNumberFrames <= preallocated.frameCapacity {
+        inputPCM = preallocated
+    } else {
+        guard let fallback = AVAudioPCMBuffer(pcmFormat: nativeFormat, frameCapacity: inNumberFrames) else {
+            return noErr
+        }
+        inputPCM = fallback
+    }
+    inputPCM.frameLength = inNumberFrames
 
     let status = AudioUnitRender(
         unit,
@@ -455,14 +494,46 @@ private func microphoneRenderCallback(
         inTimeStamp,
         1, // input bus
         inNumberFrames,
-        &bufferList
+        inputPCM.mutableAudioBufferList
     )
-
     guard status == noErr else { return status }
 
-    // Forward the Int16 samples to the callback
-    let sampleCount = Int(inNumberFrames)
-    let bufferPtr = UnsafeBufferPointer(start: buffer, count: sampleCount)
+    let outputCapacity = SystemAudioCapture.outputCapacity(
+        forInputFrames: inNumberFrames,
+        inputSampleRate: nativeFormat.sampleRate,
+        outputSampleRate: targetFormat.sampleRate
+    )
+    let outputPCM: AVAudioPCMBuffer
+    if let preallocated = context.outputPCM, outputCapacity <= preallocated.frameCapacity {
+        outputPCM = preallocated
+        outputPCM.frameLength = 0
+    } else {
+        guard let fallback = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputCapacity) else {
+            return noErr
+        }
+        outputPCM = fallback
+    }
+
+    var convertError: NSError?
+    var hasInput = false
+    converter.convert(to: outputPCM, error: &convertError) { _, outStatus in
+        if hasInput {
+            outStatus.pointee = .noDataNow
+            return nil
+        }
+        hasInput = true
+        outStatus.pointee = .haveData
+        return inputPCM
+    }
+
+    guard convertError == nil,
+          outputPCM.frameLength > 0,
+          let int16Data = outputPCM.int16ChannelData else {
+        return noErr
+    }
+
+    let sampleCount = Int(outputPCM.frameLength)
+    let bufferPtr = UnsafeBufferPointer(start: int16Data[0], count: sampleCount)
     context.onBuffer?(bufferPtr, sampleCount)
 
     return noErr
