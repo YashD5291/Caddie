@@ -51,6 +51,9 @@ final class AppState {
 
     var isInitialized = false
     var initError: String?
+    /// Surfaced to the user when a recording/transcription/device error occurs.
+    /// Cleared when the next recording starts successfully.
+    var lastRecordingError: String?
 
     /// Internal task that survives view lifecycle cancellation.
     private var initTask: Task<Void, Never>?
@@ -152,10 +155,14 @@ final class AppState {
                     case .recording:
                         self.status = .recording
                         self.recordingStartTime = Date()
+                        self.lastRecordingError = nil
                     case .transcribing:
                         self.status = .transcribing
-                    case .error:
+                    case .error(_, let error):
+                        // Keep the idle UX gate, but surface the failure so it is not
+                        // silently swallowed (core value: no silent failures).
                         self.status = .idle
+                        self.lastRecordingError = error.localizedDescription
                     }
                 }
             }

@@ -93,6 +93,18 @@ extension RecordingState {
                 .startRecording(meetingId: meetingId, meeting: meeting)
             )
 
+        // Recovery path: a previous recording or transcription failed and we're
+        // sitting in `.error`. Allow the user to start a fresh recording without
+        // having to relaunch the app — the failed meeting stays in DB as `.error`
+        // and the new one gets its own meetingId.
+        case (.error, .manualStart(let title)):
+            let meetingId = generateMeetingId()
+            let meeting = DetectedMeeting(app: "Manual", title: title, processId: nil)
+            return (
+                .recording(meetingId: meetingId),
+                .startRecording(meetingId: meetingId, meeting: meeting)
+            )
+
         case (.recording(let meetingId), .meetingEnded):
             return (
                 .transcribing(meetingId: meetingId),
@@ -137,6 +149,16 @@ extension RecordingState {
 
         case (.error, .reset):
             return (.idle, nil)
+
+        // Absorb terminal-failure events that arrive while already in `.error`.
+        // Callbacks (device disconnect, recording/transcription failure) can fire
+        // unconditionally during teardown of an already-failed meeting. Stay in
+        // `.error` with the ORIGINAL error and emit no side effect, so the first
+        // failure is preserved and the coordinator stops logging "Invalid transition".
+        case (.error, .deviceDisconnected),
+             (.error, .transcriptionFailed),
+             (.error, .recordingFailed):
+            return (state, nil)
 
         default:
             return nil
