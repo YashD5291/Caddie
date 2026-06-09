@@ -9,7 +9,9 @@ struct CaddieApp: App {
 
     init() {
         appDelegate.appState = appState
-        appDelegate.openWindowAction = openWindow
+        // openWindow must be captured from a View context — reading @Environment
+        // here in init() returns the default no-op and logs a SwiftUI warning.
+        // The capture happens in MenuBarView's .onAppear below.
     }
 
     var body: some Scene {
@@ -19,6 +21,7 @@ struct CaddieApp: App {
                 .onAppear {
                     // MenuBarExtra is created at launch — use this to open the main window.
                     // SwiftUI Window scenes are lazy and won't auto-show alongside MenuBarExtra.
+                    appDelegate.openWindowAction = openWindow
                     if !appState.hasOpenedMainWindow {
                         appState.hasOpenedMainWindow = true
                         openWindow(id: "main")
@@ -31,13 +34,8 @@ struct CaddieApp: App {
                 Image(systemName: "mic.badge.plus")
                     .symbolRenderingMode(.monochrome)
             case .recording:
-                if appState.recordingMode == .micOnly {
-                    Image(systemName: "mic.fill")
-                        .symbolRenderingMode(.monochrome)
-                } else {
-                    Image(systemName: "record.circle.fill")
-                        .symbolRenderingMode(.monochrome)
-                }
+                Image(systemName: "record.circle.fill")
+                    .symbolRenderingMode(.monochrome)
             case .transcribing:
                 Image(systemName: "waveform")
                     .symbolRenderingMode(.monochrome)
@@ -147,11 +145,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let title = response.notification.request.content.title
                 .replacingOccurrences(of: "Meeting Detected: ", with: "")
             await MainActor.run {
-                appState?.currentMeetingTitle = title
-                appState?.startManualRecording()
+                // startManualRecording(title:) sets currentMeetingTitle itself.
+                appState?.startManualRecording(title: title)
             }
         case NotificationManager.dismissAction:
-            break
+            // Suppress re-prompting for this event for the rest of the session.
+            if let eventID = response.notification.request.content.userInfo["eventID"] as? String {
+                await appState?.calendarService?.dismissEvent(eventID)
+            }
         default:
             break
         }

@@ -81,6 +81,59 @@ final class GoogleCalendarServiceTests: XCTestCase {
         XCTAssertEqual(events[0].summary, "Team Sync")
     }
 
+    func testParseEventsFiltersCancelledEvents() {
+        let json = """
+        {
+            "items": [
+                {
+                    "id": "active1",
+                    "summary": "Active Meeting",
+                    "status": "confirmed",
+                    "start": { "dateTime": "2026-04-03T10:00:00Z" },
+                    "end":   { "dateTime": "2026-04-03T10:30:00Z" }
+                },
+                {
+                    "id": "cancelled1",
+                    "summary": "Cancelled Meeting",
+                    "status": "cancelled",
+                    "start": { "dateTime": "2026-04-03T11:00:00Z" },
+                    "end":   { "dateTime": "2026-04-03T11:30:00Z" }
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let events = GoogleCalendarService.parseEvents(from: json)
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events[0].id, "active1")
+    }
+
+    func testParseEventsHandlesMissingSummary() {
+        let json = """
+        {
+            "items": [
+                {
+                    "id": "titled1",
+                    "summary": "Real Event",
+                    "start": { "dateTime": "2026-04-03T10:00:00Z" },
+                    "end":   { "dateTime": "2026-04-03T10:30:00Z" }
+                },
+                {
+                    "id": "untitled1",
+                    "start": { "dateTime": "2026-04-03T11:00:00Z" },
+                    "end":   { "dateTime": "2026-04-03T11:30:00Z" }
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let events = GoogleCalendarService.parseEvents(from: json)
+
+        XCTAssertEqual(events.count, 2, "Both events should parse — missing summary should not kill the batch")
+        XCTAssertEqual(events[1].displayName, "Untitled Event")
+    }
+
     func testParseEventsReturnsEmptyOnInvalidJSON() {
         let garbage = Data("not valid json at all }{".utf8)
         let events = GoogleCalendarService.parseEvents(from: garbage)
@@ -147,7 +200,65 @@ final class GoogleCalendarServiceTests: XCTestCase {
         XCTAssertEqual(result[0].id, "big-meeting")
     }
 
+    // MARK: - checkActiveEvents signal delivery (Finding 1 + 7)
+
+    func testActiveEventWithNilOnSignalDoesNotConsumeEvent() async {
+        let service = makeService()
+        let event = makeTimedEvent(
+            id: "active-now",
+            summary: "Standup",
+            start: Date().addingTimeInterval(-60),
+            end: Date().addingTimeInterval(600),
+            attendees: ["a@x.com", "b@x.com"]
+        )
+        await service.injectCachedEvents([event])
+
+        // onSignal is nil: checking must NOT consume the event.
+        await service.checkActiveEvents()
+
+        // Now wire onSignal and re-check: the signal must fire exactly once.
+        let box = SignalBox()
+        await service.setOnSignal { signal in box.append(signal) }
+        await service.checkActiveEvents()
+
+        let signals = box.signals
+        XCTAssertEqual(signals.count, 1, "Event should fire exactly once after onSignal is wired")
+        XCTAssertEqual(signals.first?.calendarEventID, "active-now")
+        XCTAssertEqual(signals.first?.isActive, true)
+    }
+
+    func testDismissedActiveEventDoesNotFireSignal() async {
+        let service = makeService()
+        let event = makeTimedEvent(
+            id: "dismissed-1",
+            summary: "Skip Me",
+            start: Date().addingTimeInterval(-60),
+            end: Date().addingTimeInterval(600),
+            attendees: ["a@x.com", "b@x.com"]
+        )
+        await service.injectCachedEvents([event])
+
+        let box = SignalBox()
+        await service.setOnSignal { signal in box.append(signal) }
+        await service.dismissEvent("dismissed-1")
+        await service.checkActiveEvents()
+
+        let signals = box.signals
+        XCTAssertTrue(signals.isEmpty, "Dismissed active event must not fire a signal")
+    }
+
+    func testDismissEventRecordsID() async {
+        let service = makeService()
+        await service.dismissEvent("evt-99")
+        let isDismissed = await service.isDismissed("evt-99")
+        XCTAssertTrue(isDismissed)
+    }
+
     // MARK: - Helpers
+
+    private func makeService() -> GoogleCalendarService {
+        GoogleCalendarService(authManager: GoogleAuthManager())
+    }
 
     private let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -187,5 +298,21 @@ final class GoogleCalendarServiceTests: XCTestCase {
         }
         """.data(using: .utf8)!
         return try! JSONDecoder().decode(GoogleCalendarEvent.self, from: json)
+    }
+}
+
+/// Thread-safe collector for signals emitted on the actor's `onSignal` callback.
+private final class SignalBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _signals: [DetectionSignal] = []
+
+    func append(_ signal: DetectionSignal) {
+        lock.lock(); defer { lock.unlock() }
+        _signals.append(signal)
+    }
+
+    var signals: [DetectionSignal] {
+        lock.lock(); defer { lock.unlock() }
+        return _signals
     }
 }

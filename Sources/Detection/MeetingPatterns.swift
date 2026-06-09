@@ -185,7 +185,26 @@ struct DetectionSignal {
     let processId: pid_t?
     let windowTitle: String?
     let calendarEvent: String?
+    let calendarEventID: String?
     let isActive: Bool
+
+    init(
+        source: SignalSource,
+        appName: String?,
+        processId: pid_t?,
+        windowTitle: String?,
+        calendarEvent: String?,
+        calendarEventID: String? = nil,
+        isActive: Bool
+    ) {
+        self.source = source
+        self.appName = appName
+        self.processId = processId
+        self.windowTitle = windowTitle
+        self.calendarEvent = calendarEvent
+        self.calendarEventID = calendarEventID
+        self.isActive = isActive
+    }
 
     enum SignalSource: String {
         case audioProcess

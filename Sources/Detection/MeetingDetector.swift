@@ -22,7 +22,7 @@ final class MeetingDetector {
 
     var onMeetingStarted: ((DetectedMeeting) -> Void)?
     var onMeetingEnded: (() -> Void)?
-    var onMeetingPrompt: ((String) -> Void)?
+    var onMeetingPrompt: ((_ title: String, _ eventID: String?) -> Void)?
 
     var graceSeconds: TimeInterval = 15.0
 
@@ -100,7 +100,8 @@ final class MeetingDetector {
             if hasCalendarSignal && currentMeeting == nil {
                 // Calendar-based detection: prompt user instead of auto-starting
                 cancelGrace()
-                onMeetingPrompt?(detected.title)
+                let eventID = activeSignals.first { $0.source == .googleCalendar && $0.calendarEventID != nil }?.calendarEventID
+                onMeetingPrompt?(detected.title, eventID)
             } else if currentMeeting == nil {
                 // Non-calendar detection: auto-start as before
                 cancelGrace()

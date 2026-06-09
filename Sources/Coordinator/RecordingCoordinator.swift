@@ -22,7 +22,6 @@ actor RecordingCoordinator {
     // MARK: - Callbacks
 
     private var onStateChange: (@Sendable (RecordingState) -> Void)?
-    private var onRecordingModeChange: (@Sendable (RecordingMode) -> Void)?
     private var onPipelineStepChange: (@Sendable (PipelineStep) -> Void)?
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "RecordingCoordinator")
@@ -50,10 +49,6 @@ actor RecordingCoordinator {
         self.onStateChange = callback
     }
 
-    func setOnRecordingModeChange(_ callback: (@Sendable (RecordingMode) -> Void)?) {
-        self.onRecordingModeChange = callback
-    }
-
     func setOnPipelineStepChange(_ callback: (@Sendable (PipelineStep) -> Void)?) {
         self.onPipelineStepChange = callback
     }
@@ -79,25 +74,20 @@ actor RecordingCoordinator {
     /// Call this AFTER the pipeline is fully initialized.
     func start() async {
         // Forward pipeline step changes to AppState via callback
-        nonisolated(unsafe) let stepCallback = onPipelineStepChange
+        let stepCallback = onPipelineStepChange
         await pipeline.setOnStepChange { _, step in
             stepCallback?(step)
         }
 
-        nonisolated(unsafe) let coordinator = self
-        detector.onMeetingStarted = { meeting in
-            Task { await coordinator.handle(.meetingDetected(meeting)) }
-        }
-        detector.onMeetingEnded = {
-            Task { await coordinator.handle(.meetingEnded) }
-        }
-        detector.start()
-        logger.info("RecordingCoordinator started")
+        // Auto-detection of ongoing meetings (audio process / mic / window monitors)
+        // is intentionally disabled — recording is always user-initiated. The detector
+        // instance remains so calendar-event signals can still raise notification prompts
+        // via setOnMeetingPrompt, but its audio monitors do not run.
+        logger.info("RecordingCoordinator started (auto-record disabled)")
     }
 
-    /// Stop the detector and recorder.
+    /// Stop the recorder if a recording is in progress.
     func stop() {
-        detector.stop()
         if case .recording = state {
             recorder.stop()
         }
@@ -127,13 +117,31 @@ actor RecordingCoordinator {
     }
 
     /// Set a callback for calendar-based meeting prompts on the detector.
-    func setOnMeetingPrompt(_ callback: (@Sendable (String) -> Void)?) {
+    func setOnMeetingPrompt(_ callback: (@Sendable (_ title: String, _ eventID: String?) -> Void)?) {
         detector.onMeetingPrompt = callback
     }
 
     /// Forward an external detection signal (e.g., Google Calendar) to the detector.
     func forwardSignal(_ signal: DetectionSignal) {
         detector.handleSignal(signal)
+    }
+
+    /// Switch the input device for the in-flight recording. No-op unless state is
+    /// `.recording`. Bypasses the reducer because the state doesn't change — only
+    /// the audio source mid-stream — and the underlying `AudioRecorder` handles
+    /// its own rollback on failure.
+    func switchInputDevice(deviceUID: String?) async {
+        guard case .recording = state else {
+            logger.warning("switchInputDevice ignored in state \(String(describing: self.state))")
+            return
+        }
+        do {
+            try recorder.switchDevice(deviceUID: deviceUID)
+        } catch {
+            // AudioRecorder logs the specifics; here we just surface a notification
+            // and (for the catastrophic case) let the disconnect callback finalize.
+            logger.error("switchInputDevice surfaced error: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Precondition Checks
@@ -215,34 +223,21 @@ actor RecordingCoordinator {
 
         let wavPath = AudioFileManager.wavPath(for: meetingId)
         do {
-            // Read device selection from AudioDeviceManager (MainActor property)
+            // Single source of truth: whatever input device the user selected
+            // (or system default if none). Same path for manual and auto-detected
+            // recordings — the meeting metadata (title, app) differs but the
+            // audio source is always the user's chosen device.
             let selectedDeviceUID: String? = await MainActor.run { audioDeviceManager?.selectedDeviceUID }
+            logger.info("Starting recorder for \(meetingId): device=\(selectedDeviceUID ?? "system-default") title=\"\(meeting.title)\" path=\(wavPath.lastPathComponent)")
 
-            // When a custom device is selected, use device-based capture (no process tap).
-            // When auto-detected meeting has a processId, keep process tap for system audio (more accurate).
-            // When no device selected, both UIDs are nil -> v1.0 behavior.
-            let systemDeviceUID: String? = (selectedDeviceUID != nil && meeting.processId == nil) ? selectedDeviceUID : nil
-            let micDeviceUID: String? = selectedDeviceUID
-
-            try recorder.start(
-                outputPath: wavPath,
-                processID: meeting.processId,
-                systemDeviceUID: systemDeviceUID,
-                micDeviceUID: micDeviceUID
-            )
+            try recorder.start(outputPath: wavPath, deviceUID: selectedDeviceUID)
             recorder.onDeviceDisconnected = { [self] in
                 Task { await self.handle(.deviceDisconnected) }
             }
-            let mode = recorder.recordingMode
-            onRecordingModeChange?(mode)
-            NotificationManager.recordingStarted(title: meeting.title, mode: mode)
-            if mode == .micOnly {
-                NotificationManager.systemAudioFallback()
-                logger.warning("Recording in mic-only mode -- system audio capture failed")
-            }
+            NotificationManager.recordingStarted(title: meeting.title)
             logger.info("Recording started for meeting \(meetingId)")
         } catch {
-            logger.error("Failed to start recording: \(error.localizedDescription)")
+            logger.error("Failed to start recording \(meetingId): \(error.localizedDescription) (\(String(describing: error)))")
             await handle(.recordingFailed(error))
         }
     }
@@ -253,19 +248,18 @@ actor RecordingCoordinator {
 
         let endTime = ISO8601DateFormatter().string(from: Date())
 
+        // Set end_time only. The pipeline owns the status transition to .transcribing
+        // (see TranscriptionPipeline.processJob -> updateMeetingStatus). Updating status
+        // here would cause pipeline.enqueue() to reject as a duplicate (.transcribing).
         do {
             try await database.dbWriter.write { dbConn in
                 try dbConn.execute(
-                    sql: """
-                        UPDATE meetings
-                        SET end_time = ?, status = ?
-                        WHERE meeting_id = ?
-                        """,
-                    arguments: [endTime, MeetingStatus.transcribing.rawValue, meetingId]
+                    sql: "UPDATE meetings SET end_time = ? WHERE meeting_id = ?",
+                    arguments: [endTime, meetingId]
                 )
             }
         } catch {
-            logger.error("Failed to update meeting status to transcribing: \(error.localizedDescription)")
+            logger.error("Failed to update meeting end_time: \(error.localizedDescription)")
         }
 
         logger.info("Recording stopped for meeting \(meetingId), enqueuing transcription")
@@ -341,6 +335,7 @@ actor RecordingCoordinator {
     // failure), the UPDATE will affect 0 rows. This is safe -- the error is still
     // logged and the state machine transitions correctly to .error -> .idle.
     private func executeNotifyError(meetingId: String, error: Error) async {
+        logger.error("Meeting \(meetingId) ended in error state: \(error.localizedDescription)")
         do {
             try await database.dbWriter.write { dbConn in
                 try dbConn.execute(
@@ -348,8 +343,9 @@ actor RecordingCoordinator {
                     arguments: [MeetingStatus.error.rawValue, error.localizedDescription, meetingId]
                 )
             }
+            logger.info("Updated meeting \(meetingId) status=error in DB")
         } catch {
-            logger.error("Failed to update meeting error status: \(error.localizedDescription)")
+            logger.error("Failed to update meeting \(meetingId) error status: \(error.localizedDescription)")
         }
 
         let title = await fetchMeetingTitle(meetingId: meetingId)
