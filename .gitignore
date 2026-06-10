@@ -23,3 +23,9 @@ Resources/Models/
 
 .history/
 .claude/worktrees/
+
+# Secrets
+Sources/Calendar/GoogleOAuthSecrets.swift
+
+# Python cache
+scripts/__pycache__/

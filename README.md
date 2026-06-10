@@ -99,8 +99,9 @@ To enable Google Calendar integration:
 2. Enable the **Google Calendar API**
 3. Configure **OAuth consent screen** (External, Testing mode, add your email as test user)
 4. Create an **OAuth 2.0 Client ID** (Desktop application type)
-5. Replace the placeholder client ID in `Sources/Calendar/GoogleOAuthConfig.swift` and `Resources/Info.plist`
-6. Run `xcodegen generate` to regenerate the project
+5. Copy `Sources/Calendar/GoogleOAuthSecrets.swift.template` to `Sources/Calendar/GoogleOAuthSecrets.swift` and fill in your client ID and secret from Google Cloud Console (the real file is gitignored and never committed)
+6. Update the reversed client ID in `Resources/Info.plist` to match your client ID
+7. Run `xcodegen generate` to regenerate the project
 
 ## Permissions
 
