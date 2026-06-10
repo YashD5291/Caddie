@@ -150,10 +150,17 @@ actor TranscriptionPipeline {
             logger.info("[\(meetingId)] Diarization complete: \(speakerSegments.count) speaker segments")
 
             // DATA-03: Clean up mono file explicitly after BOTH ASR and diarization complete.
-            do {
-                try FileManager.default.removeItem(at: monoURL)
-            } catch {
-                logger.warning("Failed to remove mono temp file \(monoURL.lastPathComponent): \(error.localizedDescription)")
+            // Skip when the mixdown was a no-op (recording was already mono — `monoURL == wavURL`).
+            // Deleting it here would wipe the source WAV before ALAC compression runs.
+            if monoURL != wavURL {
+                do {
+                    try FileManager.default.removeItem(at: monoURL)
+                    logger.info("[\(meetingId)] Removed temp mono mixdown")
+                } catch {
+                    logger.warning("Failed to remove mono temp file \(monoURL.lastPathComponent): \(error.localizedDescription)")
+                }
+            } else {
+                logger.info("[\(meetingId)] Mono mixdown was a no-op (recording already mono); skipping cleanup")
             }
 
             // Step 4: Merge

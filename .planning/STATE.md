@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Google Calendar + Remote Meeting Recording
-status: Ready to plan
+status: Executing Phase 14
 stopped_at: Completed 13-01-PLAN.md
-last_updated: "2026-03-24T13:03:14.332Z"
+last_updated: "2026-03-24T13:38:50.434Z"
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 4
+  total_plans: 7
   completed_plans: 4
 ---
 
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 12 — audio-capture-engine
+**Current focus:** Phase 14 — google-authentication
 
 ## Current Position
 
-Phase: 14
-Plan: Not started
+Phase: 14 (google-authentication) — EXECUTING
+Plan: 1 of 3
 
 ## Performance Metrics
 
@@ -92,8 +92,16 @@ None yet.
 - Google Cloud Console setup + OAuth consent screen needed before Phase 14 can be tested
 - Loopback virtual device testing needed for Phase 12 verification
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260610-1ur | Fix 7 code-review findings: calendar signal loss, switchDevice WAV finalization, notification title, error-state handling, LoadingOverlay task leak, RT-thread allocations, dead dismiss code | 2026-06-09 | cfc4cad | [260610-1ur-fix-7-confirmed-code-review-findings-cal](./quick/260610-1ur-fix-7-confirmed-code-review-findings-cal/) |
+| 260610-nnu | Release prep v1.1.0: externalize Google OAuth secret to gitignored file, guard against runtime sortformer download, bump version, commit branch work in 8 atomic chunks (secret-free, tests green) | 2026-06-10 | b2cebbb | [260610-nnu-release-prep-v1-1-0-externalize-oauth-se](./quick/260610-nnu-release-prep-v1-1-0-externalize-oauth-se/) |
+
 ## Session Continuity
 
-Last session: 2026-03-24T12:55:54.446Z
-Stopped at: Completed 13-01-PLAN.md
+Last session: 2026-06-10T11:47:19Z
+Last activity: 2026-06-10 - Completed quick task 260610-nnu: release prep v1.1.0 (OAuth secret externalized, sortformer guard, version bump, branch committed)
+Stopped at: Completed quick task 260610-nnu
 Resume file: None

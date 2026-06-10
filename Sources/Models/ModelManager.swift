@@ -37,6 +37,18 @@ final class ModelManager {
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "ModelManager")
 
+    // MARK: - Model Existence Checks
+
+    /// Returns true when the bundled sortformer CoreML model is present under
+    /// `<modelsDir>/sortformer/SortformerV2.mlmodelc`. Side-effect-free; used to
+    /// gate loading so no runtime HuggingFace download is ever attempted.
+    nonisolated static func sortformerModelsExist(in modelsDir: URL) -> Bool {
+        let sortformerModelPath = modelsDir
+            .appendingPathComponent("sortformer")
+            .appendingPathComponent("SortformerV2.mlmodelc")
+        return FileManager.default.fileExists(atPath: sortformerModelPath.path)
+    }
+
     // MARK: - Bundle Loading
 
     /// Loads ASR and diarization models from the app bundle.
@@ -77,6 +89,20 @@ final class ModelManager {
             logger.info("ASR models loaded")
 
             // Step 2: Load Sortformer models (~40% of work)
+            // CRITICAL: Pre-check that the bundled sortformer model exists before
+            // calling loadFromHuggingFace(). FluidAudio has no `modelsExist` equivalent
+            // for sortformer, so we check the known bundled path directly. Without this
+            // guard, a missing-models condition would let FluidAudio attempt a runtime
+            // HuggingFace download, which must never happen in a read-only/offline app
+            // bundle (mirrors the ASR guard above). When present, loadFromHuggingFace
+            // loads from cacheDirectory with no network round-trip.
+            guard Self.sortformerModelsExist(in: modelsDir) else {
+                let sortformerPath = modelsDir
+                    .appendingPathComponent("sortformer")
+                    .appendingPathComponent("SortformerV2.mlmodelc")
+                throw ModelLoadError.modelsNotFound("Sortformer models missing at \(sortformerPath.path)")
+            }
+
             logger.info("Loading diarization models from bundle...")
             let sortformerModels = try await SortformerModels.loadFromHuggingFace(
                 config: .default,

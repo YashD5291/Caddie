@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Observation
 import os
 
@@ -20,7 +21,6 @@ enum PipelineStep: String, Sendable {
 @Observable
 final class AppState {
     var status: AppStatus = .idle
-    var recordingMode: RecordingMode = .systemAndMic
     var pipelineStep: PipelineStep = .idle
     var currentMeetingTitle: String?
     var recordingStartTime: Date?
@@ -44,11 +44,16 @@ final class AppState {
     private(set) var authManager = GoogleAuthManager()
     private(set) var coordinator: RecordingCoordinator?
     var googleAuthState: GoogleAuthManager.AuthState = .signedOut
+    var todayEvents: [GoogleCalendarEvent] = []
+    private(set) var calendarService: GoogleCalendarService?
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AppState")
 
     var isInitialized = false
     var initError: String?
+    /// Surfaced to the user when a recording/transcription/device error occurs.
+    /// Cleared when the next recording starts successfully.
+    var lastRecordingError: String?
 
     /// Internal task that survives view lifecycle cancellation.
     private var initTask: Task<Void, Never>?
@@ -75,6 +80,12 @@ final class AppState {
             await authManager.restoreSession()
             googleAuthState = await authManager.state
 
+            // Start calendar service if signed in. onSignal is wired later, after the
+            // coordinator exists (see step 9).
+            if case .signedIn = googleAuthState {
+                calendarService = await startCalendarService()
+            }
+
             database = try AppDatabase()
             try AudioFileManager.ensureDirectoryExists()
             AudioFileManager.cleanupOrphanedTempFiles() // DATA-05
@@ -91,12 +102,9 @@ final class AppState {
             }
 
             // 2. Initialize ASR engine
-            // nonisolated(unsafe) suppresses Swift 6 sending checks for FluidAudio
-            // types that aren't Sendable but are moved (not shared) to the engines.
             let asrEngine = ASREngine()
             if let asrModels = modelManager.asrModels {
-                nonisolated(unsafe) let models = asrModels
-                try await asrEngine.initialize(models: models)
+                try await asrEngine.initialize(models: asrModels)
             }
 
             // 3. Initialize diarization engine
@@ -136,24 +144,19 @@ final class AppState {
                         self.status = .idle
                         self.currentMeetingTitle = nil
                         self.recordingStartTime = nil
-                        self.recordingMode = .systemAndMic
                         self.pipelineStep = .idle
                     case .recording:
                         self.status = .recording
                         self.recordingStartTime = Date()
+                        self.lastRecordingError = nil
                     case .transcribing:
                         self.status = .transcribing
-                    case .error:
+                    case .error(_, let error):
+                        // Keep the idle UX gate, but surface the failure so it is not
+                        // silently swallowed (core value: no silent failures).
                         self.status = .idle
+                        self.lastRecordingError = error.localizedDescription
                     }
-                }
-            }
-
-            // Wire recording mode changes to observable property
-            await newCoordinator.setOnRecordingModeChange { [weak self] mode in
-                Task { @MainActor in
-                    guard let self else { return }
-                    self.recordingMode = mode
                 }
             }
 
@@ -165,9 +168,24 @@ final class AppState {
                 }
             }
 
-            // 7. Start detection AFTER pipeline exists -- fixes init race (REC-04)
+            // 7. Wire calendar-based meeting prompt to notification
+            await newCoordinator.setOnMeetingPrompt { title, eventID in
+                // eventID is always present for calendar-sourced prompts; fall back to the
+                // title only if a future non-calendar source ever drives this path.
+                NotificationManager.promptToRecord(eventTitle: title, eventID: eventID ?? title)
+            }
+
+            // 8. Start detection AFTER pipeline exists -- fixes init race (REC-04)
             await newCoordinator.start()
             coordinator = newCoordinator
+
+            // 9. Wire calendar service signal to detector via coordinator
+            if let service = calendarService {
+                let coord = newCoordinator
+                await service.setOnSignal { signal in
+                    Task { await coord.forwardSignal(signal) }
+                }
+            }
 
             isInitialized = true
             logger.info("AppState initialized with RecordingCoordinator")
@@ -177,11 +195,81 @@ final class AppState {
         }
     }
 
+    /// Create a `GoogleCalendarService`, wire its events-updated callback to the
+    /// observable `todayEvents`, and start it. The `onSignal` callback is left unset
+    /// here — callers wire it once the recording coordinator exists, since the two
+    /// sign-in paths (cold start vs. interactive sign-in) wire it at different points.
+    private func startCalendarService() async -> GoogleCalendarService {
+        let service = GoogleCalendarService(authManager: authManager)
+        await service.setCallbacks(
+            onEventsUpdated: { [weak self] events in
+                Task { @MainActor in self?.todayEvents = events }
+            },
+            onSignal: nil
+        )
+        await service.start()
+        return service
+    }
+
     // MARK: - UI Actions (delegate to coordinator)
 
-    func startManualRecording() {
-        currentMeetingTitle = "Manual Recording"
-        Task { await coordinator?.startManualRecording() }
+    func startManualRecording(title: String = "Manual Recording") {
+        let selectedDevice = audioDeviceManager.selectedDeviceUID ?? "system default"
+        CaddieLogger.app.info("User requested manual recording: title='\(title)' device=\(selectedDevice)")
+
+        // Block if initialization isn't complete yet (models still loading)
+        guard coordinator != nil else {
+            CaddieLogger.app.warning("Manual recording blocked: coordinator nil (models still loading)")
+            showPermissionAlert(
+                title: "Caddie is still loading",
+                message: "AI models are still being prepared. This can take a few minutes on first launch. Please try again shortly."
+            )
+            return
+        }
+
+        // Check microphone permission before attempting to record
+        switch Permissions.microphone {
+        case .granted:
+            CaddieLogger.app.info("Mic permission granted; dispatching to coordinator")
+            currentMeetingTitle = title
+            Task { await coordinator?.startManualRecording(title: title) }
+        case .undetermined:
+            CaddieLogger.app.info("Mic permission undetermined; requesting from OS")
+            Task {
+                let granted = await Permissions.requestMicrophone()
+                CaddieLogger.app.info("Mic permission OS response: granted=\(granted)")
+                await MainActor.run {
+                    if granted {
+                        self.currentMeetingTitle = title
+                        Task { await self.coordinator?.startManualRecording(title: title) }
+                    } else {
+                        self.showPermissionAlert(
+                            title: "Microphone Access Required",
+                            message: "Caddie needs microphone access to record meetings. Enable it in System Settings."
+                        )
+                    }
+                }
+            }
+        case .denied:
+            CaddieLogger.app.warning("Manual recording blocked: mic permission denied")
+            showPermissionAlert(
+                title: "Microphone Access Required",
+                message: "Caddie needs microphone access to record meetings. Enable it in System Settings → Privacy & Security → Microphone."
+            )
+        }
+    }
+
+    private func showPermissionAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+        }
     }
 
     func stopManualRecording() {
@@ -196,12 +284,32 @@ final class AppState {
         Task { await coordinator?.retryTranscription(meetingId: meetingId) }
     }
 
+    /// User changed the input device picker. If a recording is active, switch
+    /// the live capture source; otherwise the change just persists for the
+    /// next recording (handled by AudioDeviceManager.selectedDeviceUID).
+    func switchInputDevice(deviceUID: String?) {
+        CaddieLogger.app.info("User changed input device to \(deviceUID ?? "system-default") (status=\(String(describing: self.status)))")
+        guard status == .recording else { return }
+        Task { await coordinator?.switchInputDevice(deviceUID: deviceUID) }
+    }
+
     func signInToGoogle() {
         googleAuthState = .signingIn
         Task {
             do {
                 try await authManager.signIn()
                 googleAuthState = await authManager.state
+                if case .signedIn = googleAuthState, calendarService == nil {
+                    let service = await startCalendarService()
+                    calendarService = service
+
+                    // Wire calendar signal to detector if coordinator already exists.
+                    if let coord = coordinator {
+                        await service.setOnSignal { signal in
+                            Task { await coord.forwardSignal(signal) }
+                        }
+                    }
+                }
             } catch {
                 CaddieLogger.auth.error("Google sign-in failed: \(error.localizedDescription)")
                 googleAuthState = await authManager.state
@@ -218,6 +326,9 @@ final class AppState {
 
     func signOutFromGoogle() {
         Task {
+            await calendarService?.stop()
+            calendarService = nil
+            todayEvents = []
             await authManager.signOut()
             googleAuthState = await authManager.state
         }

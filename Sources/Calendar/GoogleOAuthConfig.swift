@@ -2,17 +2,25 @@ import Foundation
 
 enum GoogleOAuthConfig {
     /// Desktop app client ID from Google Cloud Console.
-    /// Replace with actual client ID after creating OAuth credentials.
-    static let clientID = "736932798207-9j5uipki4somq90inf7ich0dvei5dvul.apps.googleusercontent.com"
+    /// Real value lives in the gitignored GoogleOAuthSecrets.swift.
+    static let clientID = GoogleOAuthSecrets.clientID
+
+    /// Desktop app client secret from Google Cloud Console.
+    /// Real value lives in the gitignored GoogleOAuthSecrets.swift.
+    static let clientSecret = GoogleOAuthSecrets.clientSecret
 
     /// Reversed client ID as custom URI scheme for OAuth redirect.
-    static let callbackScheme = "com.googleusercontent.apps.736932798207-9j5uipki4somq90inf7ich0dvei5dvul"
+    /// Derived from `clientID` so there is a single source of truth: strip the
+    /// `.apps.googleusercontent.com` suffix and prefix with `com.googleusercontent.apps.`.
+    static let callbackScheme: String = "com.googleusercontent.apps."
+        + GoogleOAuthSecrets.clientID.replacingOccurrences(
+            of: ".apps.googleusercontent.com", with: "")
 
     /// Full redirect URI registered in Google Cloud Console.
     static let redirectURI = "\(callbackScheme):/oauth2redirect/google"
 
-    /// OpenID + email for user identity, calendar read-only for event access.
-    static let scopes = "openid email https://www.googleapis.com/auth/calendar.events.readonly"
+    /// OpenID + email for user identity, calendar read-only for listing calendars + events.
+    static let scopes = "openid email https://www.googleapis.com/auth/calendar.readonly"
 
     // MARK: - Endpoints
 

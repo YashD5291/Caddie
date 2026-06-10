@@ -48,7 +48,7 @@ Meeting detected ──> Record (stereo WAV) ──> Transcribe (Parakeet ASR)
                                           ──> Notify
 ```
 
-Caddie monitors active audio sessions via CoreAudio, window titles via Accessibility, calendar events via EventKit, and (optionally) your Google Calendar via OAuth2. When a meeting is detected — locally or from your calendar — it captures two audio streams: system audio (other participants) and your microphone. You can also start/stop recording manually from the menu bar.
+Caddie monitors active audio sessions via CoreAudio, window titles via Accessibility, and your Google Calendar via OAuth2. When a meeting is detected — locally or from your calendar — it prompts you to start recording, then captures two audio streams: system audio (other participants) and your microphone. Today's schedule appears in the sidebar so you always know what's coming up. You can also start/stop recording manually from the menu bar.
 
 After the meeting ends, a local ML pipeline runs Parakeet ASR and Sortformer speaker diarization on CoreML, accelerated by the Apple Neural Engine. The transcript with speaker labels is stored alongside ALAC-compressed audio in a GRDB-backed SQLite database, fully indexed for search.
 
@@ -74,10 +74,7 @@ Built on a hardened, production-solid foundation:
 
 Grab the latest `.dmg` from [Releases](../../releases), mount it, and drag Caddie to your Applications folder.
 
-> **First launch:** Caddie is not notarized with Apple, so macOS may block it. After dragging to Applications, run this once in Terminal:
-> ```bash
-> xattr -cr /Applications/Caddie.app
-> ```
+> **First launch:** Caddie is signed and notarized with Apple. Just drag to Applications and open.
 > Then open Caddie normally from Launchpad or Applications.
 
 ### Build from Source
@@ -102,8 +99,9 @@ To enable Google Calendar integration:
 2. Enable the **Google Calendar API**
 3. Configure **OAuth consent screen** (External, Testing mode, add your email as test user)
 4. Create an **OAuth 2.0 Client ID** (Desktop application type)
-5. Replace the placeholder client ID in `Sources/Calendar/GoogleOAuthConfig.swift` and `Resources/Info.plist`
-6. Run `xcodegen generate` to regenerate the project
+5. Copy `Sources/Calendar/GoogleOAuthSecrets.swift.template` to `Sources/Calendar/GoogleOAuthSecrets.swift` and fill in your client ID and secret from Google Cloud Console (the real file is gitignored and never committed)
+6. Update the reversed client ID in `Resources/Info.plist` to match your client ID
+7. Run `xcodegen generate` to regenerate the project
 
 ## Permissions
 
@@ -112,7 +110,7 @@ To enable Google Calendar integration:
 | **Microphone** | Record your voice during meetings |
 | **Screen Recording** | Capture system audio from meeting apps |
 | **Accessibility** | Detect active meeting windows |
-| **Calendar** | Correlate recordings with calendar events |
+| **Google Calendar** | Display today's events and detect meetings (via OAuth2, no Apple Calendar needed) |
 | **Notifications** | Alert you when recordings start/stop and transcriptions complete |
 
 All requested through standard macOS prompts. Revoke anytime in System Settings > Privacy & Security.
@@ -134,8 +132,8 @@ All requested through standard macOS prompts. Revoke anytime in System Settings 
 | **Audio** | CoreAudio, AVFoundation, lock-free SPSC ring buffers |
 | **ML** | FluidAudio (Parakeet ASR + Sortformer diarization on CoreML/ANE) |
 | **Database** | GRDB 7.10 (SQLite with FTS5 full-text search) |
-| **Detection** | CoreAudio process monitoring, AXSwift (Accessibility), EventKit, Google Calendar API |
-| **Auth** | ASWebAuthenticationSession, PKCE, macOS Keychain |
+| **Detection** | CoreAudio process monitoring, AXSwift (Accessibility), Google Calendar API v3 |
+| **Auth** | OAuth2 PKCE (browser-based), macOS Keychain |
 | **Updates** | Sparkle |
 | **Build** | XcodeGen, Swift Package Manager |
 
@@ -143,12 +141,14 @@ All requested through standard macOS prompts. Revoke anytime in System Settings 
 
 ### Recently Shipped (v2.0)
 
+- Google Calendar integration — today's events in sidebar, meeting detection prompts
 - Google OAuth2 sign-in with PKCE (browser-based, tokens in Keychain)
-- Google Calendar integration during onboarding
+- No Apple Calendar dependency — events fetched directly from Google Calendar API
 - Audio device picker (select Loopback/Jump Desktop as capture source)
 - HAL AudioUnit rewrite for microphone capture
 - Manual start/stop recording from menu bar
 - Google Account section in Settings (sign-in/sign-out)
+- Apple notarized DMG distribution
 
 ### Foundation (v1.0)
 

@@ -257,6 +257,7 @@ actor GoogleAuthManager {
 
         request.httpBody = Self.formEncode([
             "client_id": GoogleOAuthConfig.clientID,
+            "client_secret": GoogleOAuthConfig.clientSecret,
             "code": code,
             "code_verifier": verifier,
             "grant_type": "authorization_code",
@@ -266,8 +267,9 @@ actor GoogleAuthManager {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let errorBody = String(data: data, encoding: .utf8) ?? "no body"
-            logger.error("Token exchange failed: \(errorBody)")
-            throw GoogleAuthError.tokenExchangeFailed
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            logger.error("Token exchange failed (HTTP \(statusCode)): \(errorBody)")
+            throw GoogleAuthError.tokenExchangeFailedWithDetails("HTTP \(statusCode): \(errorBody)")
         }
         return try JSONDecoder().decode(TokenResponse.self, from: data)
     }
@@ -279,6 +281,7 @@ actor GoogleAuthManager {
 
         request.httpBody = Self.formEncode([
             "client_id": GoogleOAuthConfig.clientID,
+            "client_secret": GoogleOAuthConfig.clientSecret,
             "refresh_token": refreshToken,
             "grant_type": "refresh_token",
         ])

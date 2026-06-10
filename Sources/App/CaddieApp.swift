@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct CaddieApp: App {
@@ -8,7 +9,9 @@ struct CaddieApp: App {
 
     init() {
         appDelegate.appState = appState
-        appDelegate.openWindowAction = openWindow
+        // openWindow must be captured from a View context — reading @Environment
+        // here in init() returns the default no-op and logs a SwiftUI warning.
+        // The capture happens in MenuBarView's .onAppear below.
     }
 
     var body: some Scene {
@@ -18,6 +21,7 @@ struct CaddieApp: App {
                 .onAppear {
                     // MenuBarExtra is created at launch — use this to open the main window.
                     // SwiftUI Window scenes are lazy and won't auto-show alongside MenuBarExtra.
+                    appDelegate.openWindowAction = openWindow
                     if !appState.hasOpenedMainWindow {
                         appState.hasOpenedMainWindow = true
                         openWindow(id: "main")
@@ -30,13 +34,8 @@ struct CaddieApp: App {
                 Image(systemName: "mic.badge.plus")
                     .symbolRenderingMode(.monochrome)
             case .recording:
-                if appState.recordingMode == .micOnly {
-                    Image(systemName: "mic.fill")
-                        .symbolRenderingMode(.monochrome)
-                } else {
-                    Image(systemName: "record.circle.fill")
-                        .symbolRenderingMode(.monochrome)
-                }
+                Image(systemName: "record.circle.fill")
+                    .symbolRenderingMode(.monochrome)
             case .transcribing:
                 Image(systemName: "waveform")
                     .symbolRenderingMode(.monochrome)
@@ -60,12 +59,13 @@ struct CaddieApp: App {
 // MARK: - AppDelegate
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var appState: AppState?
     var openWindowAction: OpenWindowAction?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         CaddieLogger.app.info("Caddie launched")
+        UNUserNotificationCenter.current().delegate = self
         NotificationManager.requestAuthorization()
 
         NotificationCenter.default.addObserver(
@@ -132,6 +132,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.setActivationPolicy(.accessory)
             }
         }
+    }
+
+    // MARK: - Notification Handling
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        switch response.actionIdentifier {
+        case NotificationManager.recordAction:
+            let title = response.notification.request.content.title
+                .replacingOccurrences(of: "Meeting Detected: ", with: "")
+            await MainActor.run {
+                // startManualRecording(title:) sets currentMeetingTitle itself.
+                appState?.startManualRecording(title: title)
+            }
+        case NotificationManager.dismissAction:
+            // Suppress re-prompting for this event for the rest of the session.
+            if let eventID = response.notification.request.content.userInfo["eventID"] as? String {
+                await appState?.calendarService?.dismissEvent(eventID)
+            }
+        default:
+            break
+        }
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 
     // MARK: - Window Identification

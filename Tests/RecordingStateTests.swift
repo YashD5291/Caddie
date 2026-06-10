@@ -153,6 +153,7 @@ final class RecordingStateTests: XCTestCase {
         XCTAssertNil(sideEffect)
     }
 
+
     // MARK: - Invalid Transitions
 
     func testIdleMeetingEndedIsInvalid() {
@@ -174,6 +175,30 @@ final class RecordingStateTests: XCTestCase {
             event: .retryRequested(meetingId: "abc123")
         )
         XCTAssertNil(result)
+    }
+
+    /// Recovery: a previous recording errored out. The user should be able to
+    /// start a fresh recording without relaunching the app — `manualStart` from
+    /// `.error` transitions to `.recording` for a brand-new meetingId.
+    func testErrorToRecordingOnManualStart() {
+        let result = RecordingState.reduce(
+            state: .error(meetingId: "old-failed", TestError.sample),
+            event: .manualStart(title: "New Recording")
+        )
+        XCTAssertNotNil(result)
+        let (newState, sideEffect) = result!
+        guard case .recording(let meetingId) = newState else {
+            XCTFail("Expected .recording state, got \(newState)")
+            return
+        }
+        XCTAssertNotEqual(meetingId, "old-failed", "must allocate a fresh meetingId")
+        guard case .startRecording(let effectId, let meeting) = sideEffect else {
+            XCTFail("Expected .startRecording side effect")
+            return
+        }
+        XCTAssertEqual(effectId, meetingId)
+        XCTAssertEqual(meeting.title, "New Recording")
+        XCTAssertEqual(meeting.app, "Manual")
     }
 
     func testRecordingMeetingDetectedIsInvalid() {
@@ -275,12 +300,48 @@ final class RecordingStateTests: XCTestCase {
         XCTAssertNil(result)
     }
 
-    func testErrorDeviceDisconnectedIsInvalid() {
+    // MARK: - Terminal Failure Absorption in .error (Finding 4)
+
+    /// Terminal failure events can arrive unconditionally from callbacks after the
+    /// state machine has already settled in `.error` (e.g. a device disconnect fires
+    /// during teardown of an already-failed recording). These must be absorbed —
+    /// staying in `.error` with the ORIGINAL error and no side effect — rather than
+    /// returning nil and triggering an "Invalid transition" log.
+
+    func testErrorDeviceDisconnectedIsAbsorbed() {
+        let original = TestError.sample
         let result = RecordingState.reduce(
-            state: .error(meetingId: "abc123", TestError.sample),
+            state: .error(meetingId: "abc123", original),
             event: .deviceDisconnected
         )
-        XCTAssertNil(result)
+        XCTAssertNotNil(result)
+        let (newState, sideEffect) = result!
+        XCTAssertEqual(newState, .error(meetingId: "abc123", original))
+        XCTAssertNil(sideEffect)
+    }
+
+    func testErrorTranscriptionFailedIsAbsorbed() {
+        let original = TestError.sample
+        let result = RecordingState.reduce(
+            state: .error(meetingId: "abc123", original),
+            event: .transcriptionFailed(meetingId: "abc123", TestError.sample)
+        )
+        XCTAssertNotNil(result)
+        let (newState, sideEffect) = result!
+        XCTAssertEqual(newState, .error(meetingId: "abc123", original))
+        XCTAssertNil(sideEffect)
+    }
+
+    func testErrorRecordingFailedIsAbsorbed() {
+        let original = TestError.sample
+        let result = RecordingState.reduce(
+            state: .error(meetingId: "abc123", original),
+            event: .recordingFailed(TestError.sample)
+        )
+        XCTAssertNotNil(result)
+        let (newState, sideEffect) = result!
+        XCTAssertEqual(newState, .error(meetingId: "abc123", original))
+        XCTAssertNil(sideEffect)
     }
 
     // MARK: - Manual Recording Transitions

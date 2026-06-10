@@ -8,7 +8,7 @@ struct MeetingDetailView: View {
     @State private var showingExportSheet = false
     @State private var showingDeleteConfirm = false
 
-    private let accentColor = Color(red: 0.976, green: 0.451, blue: 0.086) // #F97316
+    private let accentColor = Color.caddieAccent
 
     var body: some View {
         ScrollView {
@@ -130,7 +130,10 @@ struct MeetingDetailView: View {
 
     @ViewBuilder
     private var audioSection: some View {
-        if meeting.audioFile != nil {
+        // Only finished recordings have a playable audio file. While recording,
+        // the WAV is mid-write and not usable. While transcribing, the ALAC m4a
+        // doesn't exist yet (compression is the last pipeline step).
+        if meeting.status == .done, meeting.audioFile != nil {
             AudioPlayerView(audioURL: AudioFileManager.alacPath(for: meeting.meetingId))
         }
     }
@@ -150,7 +153,7 @@ struct MeetingDetailView: View {
                 }
             }
         case .recording:
-            statusCard(icon: "mic.fill", iconColor: .red, message: "Recording in progress...")
+            recordingCard
         case .transcribing:
             statusCard(icon: "text.badge.checkmark", iconColor: .orange, message: "Transcribing audio...")
         case .error:
@@ -177,6 +180,42 @@ struct MeetingDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+    }
+
+    private var recordingCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "mic.fill")
+                    .foregroundStyle(.red)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Recording in progress").font(.headline)
+                    TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                        Text(elapsedText)
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            Button {
+                appState.stopManualRecording()
+            } label: {
+                Label("Stop Recording", systemImage: "stop.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .controlSize(.regular)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var elapsedText: String {
+        guard let start = Formatters.parseISO8601(meeting.startTime) else { return "" }
+        return Formatters.duration(seconds: Int(Date().timeIntervalSince(start)))
     }
 
     private func statusCard(icon: String, iconColor: Color, message: String) -> some View {

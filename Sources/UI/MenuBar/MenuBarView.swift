@@ -1,7 +1,4 @@
 import SwiftUI
-import GRDB
-
-private let menuBarLogger = CaddieLogger.app
 
 struct MenuBarView: View {
     @Environment(AppState.self) private var appState
@@ -9,8 +6,6 @@ struct MenuBarView: View {
 
     var body: some View {
         statusSection
-        Divider()
-        recentMeetingsSection
         Divider()
         actionsSection
         Divider()
@@ -27,20 +22,28 @@ struct MenuBarView: View {
     private var statusSection: some View {
         switch appState.status {
         case .idle:
-            Text("No Active Meeting")
+            if let recordingError = appState.lastRecordingError {
+                Text("\u{26A0}\u{FE0F} Last recording failed: \(recordingError)")
+                    .foregroundStyle(.red)
+                Button("Dismiss Error") {
+                    appState.lastRecordingError = nil
+                }
+            }
+            if appState.coordinator == nil {
+                Text("Loading models...")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No Active Meeting")
+            }
             Button {
                 appState.startManualRecording()
             } label: {
                 Label("Start Recording", systemImage: "record.circle")
             }
+            .disabled(appState.coordinator == nil)
 
         case .recording:
             Text("\u{1F534} \(appState.currentMeetingTitle ?? "Recording...")")
-            if appState.recordingMode == .micOnly {
-                Text("\u{26A0}\u{FE0F} Microphone Only")
-            } else {
-                Text("System Audio + Mic")
-            }
             Text("Recording \u{00B7} \(Formatters.duration(seconds: Int(appState.recordingDuration)))")
             Button {
                 confirmStopRecording()
@@ -52,26 +55,6 @@ struct MenuBarView: View {
             Text("Processing...")
             Text(pipelineStepLabel(appState.pipelineStep))
                 .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: - Recent Meetings
-
-    @ViewBuilder
-    private var recentMeetingsSection: some View {
-        let meetings = fetchRecentMeetings()
-        if !meetings.isEmpty {
-            Section("Recent") {
-                ForEach(meetings) { meeting in
-                    Button {
-                        NSApp.setActivationPolicy(.regular)
-                        openWindow(id: "main")
-                        NSApp.activate(ignoringOtherApps: true)
-                    } label: {
-                        Text(menuLabel(for: meeting))
-                    }
-                }
-            }
         }
     }
 
@@ -110,21 +93,6 @@ struct MenuBarView: View {
         }
     }
 
-    private func fetchRecentMeetings() -> [Meeting] {
-        guard let db = appState.database else { return [] }
-        do {
-            return try db.dbWriter.read { dbConn in
-                try Meeting
-                    .order(Column("created_at").desc)
-                    .limit(3)
-                    .fetchAll(dbConn)
-            }
-        } catch {
-            menuBarLogger.warning("Failed to fetch recent meetings: \(error.localizedDescription)")
-            return []
-        }
-    }
-
     private func pipelineStepLabel(_ step: PipelineStep) -> String {
         switch step {
         case .idle: return "Queued"
@@ -132,14 +100,6 @@ struct MenuBarView: View {
         case .transcribing: return "Transcribing speech..."
         case .diarizing: return "Identifying speakers..."
         case .compressing: return "Compressing audio..."
-        }
-    }
-
-    private func menuLabel(for meeting: Meeting) -> String {
-        if let duration = meeting.durationSeconds {
-            return "\(meeting.title)  \(Formatters.duration(seconds: duration))"
-        } else {
-            return "\(meeting.title)  \(meeting.status.rawValue.capitalized)"
         }
     }
 }
