@@ -97,10 +97,11 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260610-1ur | Fix 7 code-review findings: calendar signal loss, switchDevice WAV finalization, notification title, error-state handling, LoadingOverlay task leak, RT-thread allocations, dead dismiss code | 2026-06-09 | cfc4cad | [260610-1ur-fix-7-confirmed-code-review-findings-cal](./quick/260610-1ur-fix-7-confirmed-code-review-findings-cal/) |
+| 260610-nnu | Release prep v1.1.0: externalize Google OAuth secret to gitignored file, guard against runtime sortformer download, bump version, commit branch work in 8 atomic chunks (secret-free, tests green) | 2026-06-10 | b2cebbb | [260610-nnu-release-prep-v1-1-0-externalize-oauth-se](./quick/260610-nnu-release-prep-v1-1-0-externalize-oauth-se/) |
 
 ## Session Continuity
 
-Last session: 2026-03-24T12:55:54.446Z
-Last activity: 2026-06-09 - Completed quick task 260610-1ur: fixed 7 code-review findings
-Stopped at: Completed 13-01-PLAN.md
+Last session: 2026-06-10T11:47:19Z
+Last activity: 2026-06-10 - Completed quick task 260610-nnu: release prep v1.1.0 (OAuth secret externalized, sortformer guard, version bump, branch committed)
+Stopped at: Completed quick task 260610-nnu
 Resume file: None
