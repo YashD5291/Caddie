@@ -20,7 +20,7 @@ struct LoadingOverlay: View {
     @State private var iconScale: CGFloat = 1.0
     @State private var rotation: Double = 0
 
-    private let accent = Color(red: 0.976, green: 0.451, blue: 0.086) // matches detail-view accent
+    private let accent = Color.caddieAccent
 
     var body: some View {
         ZStack {

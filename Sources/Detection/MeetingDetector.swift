@@ -20,8 +20,6 @@ final class MeetingDetector {
     var isDetectingMeeting = false
     var currentMeeting: DetectedMeeting?
 
-    var onMeetingStarted: ((DetectedMeeting) -> Void)?
-    var onMeetingEnded: (() -> Void)?
     var onMeetingPrompt: ((_ title: String, _ eventID: String?) -> Void)?
 
     var graceSeconds: TimeInterval = 15.0
@@ -103,12 +101,13 @@ final class MeetingDetector {
                 let eventID = activeSignals.first { $0.source == .googleCalendar && $0.calendarEventID != nil }?.calendarEventID
                 onMeetingPrompt?(detected.title, eventID)
             } else if currentMeeting == nil {
-                // Non-calendar detection: auto-start as before
+                // Non-calendar detection: track the active meeting so grace-period
+                // teardown can run. Auto-start was removed (recording is user-initiated);
+                // this branch only maintains detector state.
                 cancelGrace()
                 currentMeeting = detected
                 isDetectingMeeting = true
-                onMeetingStarted?(detected)
-                logger.info("Meeting started: \(detected.title) via \(detected.app)")
+                logger.info("Meeting detected: \(detected.title) via \(detected.app)")
             } else if currentMeeting != nil {
                 cancelGrace()
                 currentMeeting = detected
@@ -141,13 +140,9 @@ final class MeetingDetector {
         if graceElapsed >= graceSeconds {
             logger.info("Grace period expired — meeting ended")
             cancelGrace()
-            let wasDetecting = isDetectingMeeting
             isDetectingMeeting = false
             currentMeeting = nil
             activeSignals = []
-            if wasDetecting {
-                onMeetingEnded?()
-            }
         }
     }
 

@@ -8,7 +8,7 @@ struct MeetingDetailView: View {
     @State private var showingExportSheet = false
     @State private var showingDeleteConfirm = false
 
-    private let accentColor = Color(red: 0.976, green: 0.451, blue: 0.086) // #F97316
+    private let accentColor = Color.caddieAccent
 
     var body: some View {
         ScrollView {
@@ -214,7 +214,7 @@ struct MeetingDetailView: View {
     }
 
     private var elapsedText: String {
-        guard let start = ISO8601DateFormatter().date(from: meeting.startTime) else { return "" }
+        guard let start = Formatters.parseISO8601(meeting.startTime) else { return "" }
         return Formatters.duration(seconds: Int(Date().timeIntervalSince(start)))
     }
 

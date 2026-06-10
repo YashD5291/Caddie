@@ -233,7 +233,7 @@ private struct OngoingMeetingRow: View {
     private var elapsedText: String {
         switch meeting.status {
         case .recording:
-            guard let start = ISO8601DateFormatter().date(from: meeting.startTime) else { return "" }
+            guard let start = Formatters.parseISO8601(meeting.startTime) else { return "" }
             return Formatters.duration(seconds: Int(Date().timeIntervalSince(start)))
         case .transcribing:
             return "Processing\u{2026}"

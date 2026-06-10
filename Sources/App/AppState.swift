@@ -80,17 +80,10 @@ final class AppState {
             await authManager.restoreSession()
             googleAuthState = await authManager.state
 
-            // Start calendar service if signed in
+            // Start calendar service if signed in. onSignal is wired later, after the
+            // coordinator exists (see step 9).
             if case .signedIn = googleAuthState {
-                let service = GoogleCalendarService(authManager: authManager)
-                await service.setCallbacks(
-                    onEventsUpdated: { [weak self] events in
-                        Task { @MainActor in self?.todayEvents = events }
-                    },
-                    onSignal: nil // Wired after coordinator is created
-                )
-                await service.start()
-                calendarService = service
+                calendarService = await startCalendarService()
             }
 
             database = try AppDatabase()
@@ -202,6 +195,22 @@ final class AppState {
         }
     }
 
+    /// Create a `GoogleCalendarService`, wire its events-updated callback to the
+    /// observable `todayEvents`, and start it. The `onSignal` callback is left unset
+    /// here — callers wire it once the recording coordinator exists, since the two
+    /// sign-in paths (cold start vs. interactive sign-in) wire it at different points.
+    private func startCalendarService() async -> GoogleCalendarService {
+        let service = GoogleCalendarService(authManager: authManager)
+        await service.setCallbacks(
+            onEventsUpdated: { [weak self] events in
+                Task { @MainActor in self?.todayEvents = events }
+            },
+            onSignal: nil
+        )
+        await service.start()
+        return service
+    }
+
     // MARK: - UI Actions (delegate to coordinator)
 
     func startManualRecording(title: String = "Manual Recording") {
@@ -291,17 +300,10 @@ final class AppState {
                 try await authManager.signIn()
                 googleAuthState = await authManager.state
                 if case .signedIn = googleAuthState, calendarService == nil {
-                    let service = GoogleCalendarService(authManager: authManager)
-                    await service.setCallbacks(
-                        onEventsUpdated: { [weak self] events in
-                            Task { @MainActor in self?.todayEvents = events }
-                        },
-                        onSignal: nil
-                    )
-                    await service.start()
+                    let service = await startCalendarService()
                     calendarService = service
 
-                    // Wire calendar signal to detector if coordinator exists
+                    // Wire calendar signal to detector if coordinator already exists.
                     if let coord = coordinator {
                         await service.setOnSignal { signal in
                             Task { await coord.forwardSignal(signal) }

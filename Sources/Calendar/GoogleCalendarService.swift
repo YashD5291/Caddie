@@ -53,9 +53,13 @@ actor GoogleCalendarService {
         dismissedEventIDs.insert(eventID)
     }
 
+    #if DEBUG
+    /// Test seam: inspect whether an event ID has been dismissed. Only the
+    /// internal `dismissedEventIDs` set is consulted at runtime.
     func isDismissed(_ eventID: String) -> Bool {
         dismissedEventIDs.contains(eventID)
     }
+    #endif
 
     // MARK: - Fetching
 
@@ -168,11 +172,13 @@ actor GoogleCalendarService {
 
     // MARK: - Test Support
 
+    #if DEBUG
     /// Seed the in-memory event cache directly (used by unit tests that exercise
     /// `checkActiveEvents` without a live network fetch).
     func injectCachedEvents(_ events: [GoogleCalendarEvent]) {
         cachedEvents = events
     }
+    #endif
 
     // MARK: - Static Helpers (testable)
 

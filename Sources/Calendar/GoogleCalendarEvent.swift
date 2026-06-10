@@ -27,12 +27,12 @@ struct GoogleCalendarEvent: Codable, Identifiable, Sendable {
 
     var startDate: Date? {
         guard let dt = start.dateTime else { return nil }
-        return ISO8601DateFormatter().date(from: dt)
+        return Formatters.parseISO8601(dt)
     }
 
     var endDate: Date? {
         guard let dt = end.dateTime else { return nil }
-        return ISO8601DateFormatter().date(from: dt)
+        return Formatters.parseISO8601(dt)
     }
 
     var attendeeCount: Int { attendees?.count ?? 0 }

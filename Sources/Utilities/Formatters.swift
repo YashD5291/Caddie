@@ -1,6 +1,57 @@
 import Foundation
 
 enum Formatters {
+
+    // MARK: - Cached Formatters
+
+    // These formatters are configured once and only ever read afterwards. Apple
+    // documents `ISO8601DateFormatter`/`DateFormatter` string<->date conversion as
+    // thread-safe, so sharing immutable instances is sound; `nonisolated(unsafe)`
+    // tells Swift 6's strict-concurrency checker we've reasoned about the access.
+
+    /// Shared ISO8601 parser (with fractional seconds). Avoids the per-access
+    /// allocation previously scattered across event models and views.
+    private nonisolated(unsafe) static let iso8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    /// Fallback parser for ISO8601 strings without fractional seconds.
+    private nonisolated(unsafe) static let iso8601NoFraction: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    /// Localized short time formatter (e.g. "2:45 PM").
+    private nonisolated(unsafe) static let shortTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    /// Hour:minute time formatter (e.g. "9:30 AM") used for calendar time ranges.
+    private nonisolated(unsafe) static let hourMinute: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter
+    }()
+
+    /// Parses an ISO8601 datetime string into a `Date`, tolerating both
+    /// fractional-second and whole-second representations.
+    static func parseISO8601(_ string: String) -> Date? {
+        iso8601.date(from: string) ?? iso8601NoFraction.date(from: string)
+    }
+
+    /// Formats a start/end pair into a localized range like "9:30 AM – 10:00 AM".
+    static func timeRange(_ start: Date, _ end: Date) -> String {
+        "\(hourMinute.string(from: start)) \u{2013} \(hourMinute.string(from: end))"
+    }
+
+    // MARK: - Durations
+
     /// Formats a duration in seconds into a human-readable string.
     /// Examples: "45m", "1h 30m", "0m"
     static func duration(seconds: Int) -> String {
@@ -15,21 +66,8 @@ enum Formatters {
     /// Formats an ISO8601 datetime string into a localized time string.
     /// Example: "2:45 PM"
     static func time(from iso8601String: String) -> String? {
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        var date = isoFormatter.date(from: iso8601String)
-        if date == nil {
-            isoFormatter.formatOptions = [.withInternetDateTime]
-            date = isoFormatter.date(from: iso8601String)
-        }
-
-        guard let parsed = date else { return nil }
-
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateStyle = .none
-        timeFormatter.timeStyle = .short
-        return timeFormatter.string(from: parsed)
+        guard let parsed = parseISO8601(iso8601String) else { return nil }
+        return shortTime.string(from: parsed)
     }
 
     /// Returns "Today", "Yesterday", or a formatted date like "Mon, Mar 17".

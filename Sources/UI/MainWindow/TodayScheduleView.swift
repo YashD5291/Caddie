@@ -164,9 +164,7 @@ struct CalendarEventRow: View {
     }
 
     private var timeRangeText: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
         guard let start = event.startDate, let end = event.endDate else { return "" }
-        return "\(formatter.string(from: start)) – \(formatter.string(from: end))"
+        return Formatters.timeRange(start, end)
     }
 }
