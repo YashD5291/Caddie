@@ -4,6 +4,7 @@ enum GoogleAuthError: Error, LocalizedError {
     case notSignedIn
     case noAuthCode
     case tokenExchangeFailed
+    case tokenExchangeFailedWithDetails(String)
     case refreshFailed
     case userInfoFailed
     case keychainError(String)
@@ -16,6 +17,8 @@ enum GoogleAuthError: Error, LocalizedError {
             return "Failed to receive authorization code from Google."
         case .tokenExchangeFailed:
             return "Failed to exchange authorization code for tokens."
+        case .tokenExchangeFailedWithDetails(let details):
+            return "Token exchange failed: \(details)"
         case .refreshFailed:
             return "Failed to refresh access token. Please sign in again."
         case .userInfoFailed:

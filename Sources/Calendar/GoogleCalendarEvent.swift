@@ -2,7 +2,8 @@ import Foundation
 
 struct GoogleCalendarEvent: Codable, Identifiable, Sendable {
     let id: String
-    let summary: String
+    let summary: String?
+    let status: String?
     let start: EventDateTime
     let end: EventDateTime
     let attendees: [Attendee]?
@@ -15,7 +16,12 @@ struct GoogleCalendarEvent: Codable, Identifiable, Sendable {
 
     struct Attendee: Codable, Sendable {
         let email: String
+        let responseStatus: String?
     }
+
+    var displayName: String { summary ?? "Untitled Event" }
+
+    var isCancelled: Bool { status == "cancelled" }
 
     var isAllDay: Bool { start.dateTime == nil && start.date != nil }
 

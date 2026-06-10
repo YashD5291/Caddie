@@ -185,6 +185,83 @@ final class GoogleCalendarEventTests: XCTestCase {
         XCTAssertFalse(event.isUpcoming)
     }
 
+    // MARK: - Missing summary (the root cause bug)
+
+    func testDecodesEventWithoutSummary() throws {
+        let json = """
+        {
+            "id": "no-title",
+            "start": { "dateTime": "2026-04-03T10:00:00Z" },
+            "end":   { "dateTime": "2026-04-03T10:30:00Z" }
+        }
+        """.data(using: .utf8)!
+
+        let event = try JSONDecoder().decode(GoogleCalendarEvent.self, from: json)
+
+        XCTAssertNil(event.summary)
+        XCTAssertEqual(event.displayName, "Untitled Event")
+    }
+
+    func testDecodesResponseWithMixOfTitledAndUntitledEvents() throws {
+        let json = """
+        {
+            "items": [
+                {
+                    "id": "e1",
+                    "summary": "Real Meeting",
+                    "start": { "dateTime": "2026-04-03T09:00:00Z" },
+                    "end":   { "dateTime": "2026-04-03T09:30:00Z" }
+                },
+                {
+                    "id": "e2",
+                    "start": { "dateTime": "2026-04-03T11:00:00Z" },
+                    "end":   { "dateTime": "2026-04-03T12:00:00Z" }
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(GoogleCalendarEventsResponse.self, from: json)
+
+        XCTAssertEqual(response.items.count, 2)
+        XCTAssertEqual(response.items[0].displayName, "Real Meeting")
+        XCTAssertEqual(response.items[1].displayName, "Untitled Event")
+    }
+
+    // MARK: - Cancelled events
+
+    func testCancelledEventDetected() throws {
+        let json = """
+        {
+            "id": "cancel1",
+            "summary": "Old Meeting",
+            "status": "cancelled",
+            "start": { "dateTime": "2026-04-03T10:00:00Z" },
+            "end":   { "dateTime": "2026-04-03T10:30:00Z" }
+        }
+        """.data(using: .utf8)!
+
+        let event = try JSONDecoder().decode(GoogleCalendarEvent.self, from: json)
+
+        XCTAssertTrue(event.isCancelled)
+    }
+
+    func testConfirmedEventIsNotCancelled() throws {
+        let json = """
+        {
+            "id": "conf1",
+            "summary": "Active Meeting",
+            "status": "confirmed",
+            "start": { "dateTime": "2026-04-03T10:00:00Z" },
+            "end":   { "dateTime": "2026-04-03T10:30:00Z" }
+        }
+        """.data(using: .utf8)!
+
+        let event = try JSONDecoder().decode(GoogleCalendarEvent.self, from: json)
+
+        XCTAssertFalse(event.isCancelled)
+    }
+
     // MARK: - attendeeCount
 
     func testAttendeeCountIsZeroWhenNil() throws {
