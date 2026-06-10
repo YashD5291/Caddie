@@ -25,6 +25,10 @@ settings:
       CODE_SIGN_ENTITLEMENTS: Resources/CaddieDebug.entitlements
       CODE_SIGN_INJECT_BASE_ENTITLEMENTS: YES
       OTHER_CODE_SIGN_FLAGS: ""
+      # The entitlements file carries an immovable `com.apple.provenance` xattr that
+      # Xcode's ProcessProductPackaging step perceives as an in-build modification.
+      # Allow it for Debug only; Release keeps strict packaging for notarized builds.
+      CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION: YES
     Release:
       CODE_SIGN_IDENTITY: "Developer ID Application"
       CODE_SIGN_STYLE: Manual
@@ -78,6 +82,7 @@ targets:
         excludes:
           - "Assets.xcassets"
           - "Models/**/*.mlpackage"
+          - "*.entitlements"
     dependencies:
       - package: GRDB
       - package: SimplyCoreAudio

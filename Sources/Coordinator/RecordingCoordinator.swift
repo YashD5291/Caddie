@@ -81,8 +81,10 @@ actor RecordingCoordinator {
 
         // Auto-detection of ongoing meetings (audio process / mic / window monitors)
         // is intentionally disabled — recording is always user-initiated. The detector
-        // instance remains so calendar-event signals can still raise notification prompts
-        // via setOnMeetingPrompt, but its audio monitors do not run.
+        // instance remains so calendar-event signals forwarded via forwardSignal fire
+        // notification prompts directly through the detector's calendar special-case
+        // (it bypasses the dormant DecisionEngine, which requires >=2 active signals).
+        // The audio/mic/window monitors do not run.
         logger.info("RecordingCoordinator started (auto-record disabled)")
     }
 

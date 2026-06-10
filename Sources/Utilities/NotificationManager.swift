@@ -85,7 +85,7 @@ enum NotificationManager {
         content.body = "Your calendar event is in progress. Start recording?"
         content.sound = .default
         content.categoryIdentifier = meetingDetectedCategory
-        content.userInfo = ["eventID": eventID]
+        content.userInfo = ["eventID": eventID, "title": eventTitle]
         send(identifier: promptIdentifier(eventID: eventID), content: content)
     }
 
