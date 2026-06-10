@@ -349,6 +349,7 @@ final class MicrophoneCapture {
             from: nativeFormat,
             toSampleRate: Self.targetSampleRate
         ) else {
+            logger.error("Failed to create downsampling converter for HAL device \(deviceID): native \(nativeFormat.mSampleRate)Hz \(nativeFormat.mChannelsPerFrame)ch -> target \(Self.targetSampleRate)Hz mono")
             throw CaptureError.failedToCreateConverter
         }
 

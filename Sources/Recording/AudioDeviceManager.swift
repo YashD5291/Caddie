@@ -19,6 +19,12 @@ final class AudioDeviceManager {
     private(set) var availableInputDevices: [InputDevice] = []
     private(set) var isUsingFallback: Bool = false
 
+    /// Name of the macOS system default input device, cached as observable state so
+    /// the toolbar can label "System Default" with the actual device (e.g.
+    /// "Default · MacBook Pro Microphone") without a live CoreAudio query on every
+    /// render. Refreshed on device-list and default-input changes.
+    private(set) var systemDefaultInputName: String?
+
     var selectedDeviceUID: String? {
         didSet { persistSelection() }
     }
@@ -33,7 +39,7 @@ final class AudioDeviceManager {
     // Set in MainActor methods, read from nonisolated deinit. Plain `nonisolated` is
     // rejected on a mutable stored property, so `(unsafe)` is required despite Xcode's
     // misleading "has no effect" warning.
-    private nonisolated(unsafe) var observer: NSObjectProtocol?
+    private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
     private let logger = Logger(subsystem: "com.caddie.app", category: "AudioDeviceManager")
 
     // MARK: - Lifecycle
@@ -57,6 +63,7 @@ final class AudioDeviceManager {
                     audioDeviceID: device.id
                 )
             }
+        systemDefaultInputName = coreAudio.defaultInputDevice?.name
         logger.info("Refreshed input devices: \(self.availableInputDevices.count) available")
     }
 
@@ -64,13 +71,6 @@ final class AudioDeviceManager {
     func resolvedDeviceID() -> AudioObjectID? {
         guard let uid = selectedDeviceUID else { return nil }
         return AudioDevice.lookup(by: uid)?.id
-    }
-
-    /// Name of the macOS system default input device, used to label the picker
-    /// when the user has selected "System Default" so they see what's actually
-    /// being recorded from (e.g. "Default · MacBook Pro Microphone").
-    var systemDefaultInputName: String? {
-        coreAudio.defaultInputDevice?.name
     }
 
     // MARK: - Private
@@ -102,7 +102,9 @@ final class AudioDeviceManager {
     }
 
     private func subscribeToChanges() {
-        observer = NotificationCenter.default.addObserver(
+        // Device list changing (plug/unplug) affects the available device set and
+        // possibly the resolved system default.
+        let listObserver = NotificationCenter.default.addObserver(
             forName: .deviceListChanged,
             object: nil,
             queue: .main
@@ -111,9 +113,25 @@ final class AudioDeviceManager {
             self.refresh()
             self.validateSelection()
         }
+
+        // The user switching the system default input (without the device list
+        // changing) must update the cached `systemDefaultInputName` so the toolbar
+        // label doesn't go stale.
+        let defaultObserver = NotificationCenter.default.addObserver(
+            forName: .defaultInputDeviceChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.refresh()
+        }
+
+        observers = [listObserver, defaultObserver]
     }
 
     deinit {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 }

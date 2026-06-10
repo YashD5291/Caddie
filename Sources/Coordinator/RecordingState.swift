@@ -150,11 +150,12 @@ extension RecordingState {
         case (.error, .reset):
             return (.idle, nil)
 
-        // Absorb terminal-failure events that arrive while already in `.error`.
-        // Callbacks (device disconnect, recording/transcription failure) can fire
-        // unconditionally during teardown of an already-failed meeting. Stay in
-        // `.error` with the ORIGINAL error and emit no side effect, so the first
-        // failure is preserved and the coordinator stops logging "Invalid transition".
+        /// Absorb late-arriving teardown events for an already-failed recording.
+        /// Device-disconnect and recording/transcription-failure callbacks can fire
+        /// unconditionally while tearing down a meeting that already entered `.error`.
+        /// We stay in `.error` with the ORIGINAL error and emit no side effect, so no
+        /// information is lost (the first failure — surfaced via `lastRecordingError` —
+        /// is preserved) and the coordinator stops logging "Invalid transition".
         case (.error, .deviceDisconnected),
              (.error, .transcriptionFailed),
              (.error, .recordingFailed):

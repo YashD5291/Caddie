@@ -112,6 +112,12 @@ struct ContentView: View {
 
     // MARK: - Main Content
 
+    /// True while the RecordingCoordinator is still being constructed (ML models
+    /// loading) and no init error has surfaced — drives the loading overlay.
+    private var isLoadingPipeline: Bool {
+        appState.coordinator == nil && appState.initError == nil
+    }
+
     @ViewBuilder
     private var mainContent: some View {
         NavigationSplitView {
@@ -139,15 +145,22 @@ struct ContentView: View {
             // can take 30+ seconds on first launch (Parakeet encoder + Sortformer),
             // and we don't want the user staring at a faded New Recording button
             // wondering whether the app is broken.
-            if appState.coordinator == nil && appState.initError == nil {
+            if isLoadingPipeline {
                 LoadingOverlay()
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.35), value: appState.coordinator == nil)
+        .animation(.easeInOut(duration: 0.35), value: isLoadingPipeline)
         .onAppear { startObserving() }
         .onDisappear { observationCancellable?.cancel() }
-        .onChange(of: searchText) { _, _ in startObserving() }
+        .task(id: searchText) {
+            // Debounce keystrokes so we don't tear down and rebuild the GRDB
+            // ValueObservation on every character. The initial observation is set up
+            // by onAppear / the isInitialized handler; this only handles edits.
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            startObserving()
+        }
         .onChange(of: appState.isInitialized) { _, ready in
             // Database becomes available only after initialize() completes.
             // First onAppear may fire while database is still nil — retry once ready.
