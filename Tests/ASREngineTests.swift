@@ -72,4 +72,40 @@ final class ASREngineTests: XCTestCase {
         XCTAssertEqual(segments[0].text, "Hello")
         XCTAssertEqual(segments[0].words.count, 1)
     }
+
+    /// Parakeet emits SentencePiece sub-word tokens. FluidAudio normalizes the ▁
+    /// (U+2581) word-boundary marker to a leading space on word-start tokens; continuation
+    /// tokens have no leading space. Detokenization concatenates and collapses the
+    /// markers, e.g. [" play", "ing", " is", " good", "."] → "playing is good."
+    func testGroupTokens_subWordTokensDetokenizeCorrectly() {
+        let tokens: [(word: String, start: Double, end: Double)] = [
+            (" play", 0.0, 0.2),
+            ("ing", 0.2, 0.35),
+            (" is", 0.35, 0.5),
+            (" good", 0.5, 0.7),
+            (".", 0.7, 0.75)
+        ]
+
+        let segments = ASREngine.groupTokensIntoSegments(tokens: tokens)
+
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(segments[0].text, "playing is good.")
+    }
+
+    /// Multi-word continuation: "customers" tokenizes as four pieces in real Parakeet
+    /// output (` c`, `ust`, `om`, `ers`). Without leading-space-aware joining this
+    /// would render as "c ust om ers" — the bug we shipped in the first transcript.
+    func testGroupTokens_continuationTokensDoNotInsertSpaces() {
+        let tokens: [(word: String, start: Double, end: Double)] = [
+            (" c", 0.0, 0.05),
+            ("ust", 0.05, 0.15),
+            ("om", 0.15, 0.25),
+            ("ers", 0.25, 0.4)
+        ]
+
+        let segments = ASREngine.groupTokensIntoSegments(tokens: tokens)
+
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(segments[0].text, "customers")
+    }
 }

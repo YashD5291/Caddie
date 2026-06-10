@@ -78,11 +78,20 @@ final class ASREngine: ASREngineProtocol, @unchecked Sendable {
 
         var segments: [ASRSegment] = []
         var currentWords: [WordTimestamp] = []
+        // Raw tokens keep the leading-space marker that FluidAudio emits for
+        // word-start tokens (the SentencePiece ▁ → " " normalization). We need
+        // those markers to detokenize correctly: continuation tokens have no
+        // leading space and must concatenate directly. Joining with " " (the
+        // old behavior) split sub-word continuations like ["c", "ust", "om", "ers"]
+        // into "c ust om ers" instead of "customers".
+        var currentRawTokens: [String] = []
         var segmentStart: Double = tokens[0].start
 
         for (index, token) in tokens.enumerated() {
-            let trimmedWord = token.word.trimmingCharacters(in: .whitespaces)
+            let rawToken = token.word
+            let trimmedWord = rawToken.trimmingCharacters(in: .whitespaces)
             currentWords.append(WordTimestamp(word: trimmedWord, start: token.start, end: token.end))
+            currentRawTokens.append(rawToken)
 
             let isLastToken = index == tokens.count - 1
             let endsWithPunctuation = trimmedWord.last.map { ".?!".contains($0) } ?? false
@@ -100,7 +109,8 @@ final class ASREngine: ASREngineProtocol, @unchecked Sendable {
                 || segmentDuration >= maxSegmentDuration
 
             if shouldSplit && !currentWords.isEmpty {
-                let text = currentWords.map(\.word).joined(separator: " ")
+                let text = currentRawTokens.joined()
+                    .trimmingCharacters(in: .whitespaces)
                 segments.append(ASRSegment(
                     start: segmentStart,
                     end: token.end,
@@ -108,6 +118,7 @@ final class ASREngine: ASREngineProtocol, @unchecked Sendable {
                     words: currentWords
                 ))
                 currentWords = []
+                currentRawTokens = []
                 if !isLastToken {
                     segmentStart = tokens[index + 1].start
                 }
