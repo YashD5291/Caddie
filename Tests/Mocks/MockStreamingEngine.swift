@@ -12,7 +12,7 @@ final class MockStreamingEngine: StreamingTranscriptionEngine, @unchecked Sendab
 
     private var continuation: AsyncStream<(text: String, isConfirmed: Bool)>.Continuation?
 
-    func start(models: AsrModels?) async throws {
+    func start() async throws {
         startCallCount += 1
         if let startError { throw startError }
     }

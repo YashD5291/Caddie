@@ -5,10 +5,12 @@ import FluidAudio
 /// update plumbing is unit-testable without loading CoreML models.
 /// All members are async because the production conformer is an actor.
 protocol StreamingTranscriptionEngine: Sendable {
-    /// `models` is optional so the update-plumbing tests can drive the seam with
-    /// a mock engine that needs no real CoreML models. The production conformer
-    /// requires non-nil models and logs+returns inert if they are absent.
-    func start(models: AsrModels?) async throws
+    /// No `models` parameter: ASR models are bound at engine construction. AppState
+    /// only constructs the engine once bundled models are loaded, so absent-models is
+    /// unrepresentable at this layer — matching the spec's failure table ("ASR models
+    /// absent → LiveTranscriber never constructed"). This keeps the start contract
+    /// optional-free for both the production conformer and test mocks.
+    func start() async throws
     func stream(_ buffer: sending AVAudioPCMBuffer) async
     func updates() -> AsyncStream<(text: String, isConfirmed: Bool)>
     func cancel() async
@@ -16,15 +18,16 @@ protocol StreamingTranscriptionEngine: Sendable {
 
 /// Production conformer backing onto FluidAudio's StreamingAsrManager with the
 /// low-latency `.streaming` preset. Microphone source (live view never shows
-/// system audio separately).
+/// system audio separately). Models are bound at init.
 final class FluidStreamingEngine: StreamingTranscriptionEngine, @unchecked Sendable {
     private let manager = StreamingAsrManager(config: .streaming)
+    private let models: AsrModels
 
-    func start(models: AsrModels?) async throws {
-        guard let models else {
-            CaddieLogger.transcription.warning("FluidStreamingEngine.start skipped: ASR models absent")
-            return
-        }
+    init(models: AsrModels) {
+        self.models = models
+    }
+
+    func start() async throws {
         try await manager.start(models: models, source: .microphone)
     }
 

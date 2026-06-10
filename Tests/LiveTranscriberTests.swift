@@ -39,7 +39,7 @@ final class LiveTranscriberTests: XCTestCase {
             received.append((confirmed, volatile))
         }
 
-        await transcriber.start(models: nil)
+        await transcriber.start()
         XCTAssertEqual(engine.startCallCount, 1)
 
         // A volatile update arrives first (still revising).
@@ -60,7 +60,7 @@ final class LiveTranscriberTests: XCTestCase {
     func testStopCancelsEngineAndIsIdempotent() async {
         let engine = MockStreamingEngine()
         let transcriber = LiveTranscriber(engine: engine)
-        await transcriber.start(models: nil)
+        await transcriber.start()
 
         await transcriber.stop()
         await transcriber.stop()  // idempotent: no second cancel, no crash
@@ -74,7 +74,7 @@ final class LiveTranscriberTests: XCTestCase {
         let transcriber = LiveTranscriber(engine: engine)
 
         // Must NOT throw — errors are logged and swallowed so recording survives.
-        await transcriber.start(models: nil)
+        await transcriber.start()
 
         // After a failed start, feed/stop are safe no-ops.
         transcriber.feed(samples: [1, 2, 3])

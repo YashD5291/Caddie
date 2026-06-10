@@ -23,16 +23,17 @@ final class LiveTranscriber {
     private var confirmedText = ""
     private var volatileText = ""
 
-    init(engine: StreamingTranscriptionEngine = FluidStreamingEngine()) {
+    init(engine: StreamingTranscriptionEngine) {
         self.engine = engine
     }
 
-    /// Start streaming. Reuses already-loaded ASR models. Never throws — start
-    /// failures are logged and leave the transcriber inert.
-    func start(models: AsrModels?) async {
+    /// Start streaming. The engine already holds its ASR models (bound at
+    /// construction). Never throws — start failures are logged and leave the
+    /// transcriber inert.
+    func start() async {
         guard !isRunning else { return }
         do {
-            try await engine.start(models: models)
+            try await engine.start()
         } catch {
             CaddieLogger.transcription.error("LiveTranscriber failed to start: \(error.localizedDescription)")
             return
