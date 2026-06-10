@@ -17,80 +17,17 @@ struct ContentView: View {
                 ))
             } else if let error = appState.initError {
                 initErrorView(error)
-            } else if !isSignedInToGoogle {
-                googleSignInGate
             } else {
+                // Local features (recordings list, playback, manual recording) are
+                // available signed-out. Onboarding (ONB-01) already enforces Google
+                // sign-in before completion, and the calendar sign-in requirement is
+                // surfaced in the sidebar's Today's Schedule area when signed out.
                 mainContent
             }
         }
         .task {
             await appState.ensureInitialized()
         }
-    }
-
-    private var isSignedInToGoogle: Bool {
-        if case .signedIn = appState.googleAuthState { return true }
-        return false
-    }
-
-    // MARK: - Google Sign-In Gate
-
-    @ViewBuilder
-    private var googleSignInGate: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "calendar.badge.plus")
-                .font(.system(size: 56, weight: .thin))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.orange)
-
-            Text("Connect Google Calendar")
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-
-            Text("Caddie uses Google Calendar to detect meetings and show your schedule. Sign in to continue.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
-
-            switch appState.googleAuthState {
-            case .signingIn:
-                ProgressView()
-                    .controlSize(.regular)
-                Text("Complete sign-in in your browser.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Cancel") {
-                    appState.cancelGoogleSignIn()
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            case .error(let message):
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 400)
-
-                Button("Try Again") {
-                    appState.signInToGoogle()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
-                .controlSize(.large)
-
-            default:
-                Button("Sign in with Google") {
-                    appState.signInToGoogle()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
-                .controlSize(.large)
-                .padding(.top, 12)
-            }
-        }
-        .padding(40)
-        .frame(minWidth: 520, minHeight: 520)
     }
 
     // MARK: - Error State
