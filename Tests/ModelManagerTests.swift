@@ -50,4 +50,27 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertNil(manager.loadError)
         XCTAssertFalse(manager.modelsReady)
     }
+
+    // MARK: - Sortformer No-Runtime-Download Guard
+
+    func testSortformerModelsExistReturnsFalseWhenMissing() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelManagerTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        XCTAssertFalse(ModelManager.sortformerModelsExist(in: tempDir))
+    }
+
+    func testSortformerModelsExistReturnsTrueWhenPresent() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelManagerTests-\(UUID().uuidString)")
+        let modelPath = tempDir
+            .appendingPathComponent("sortformer")
+            .appendingPathComponent("SortformerV2.mlmodelc")
+        try FileManager.default.createDirectory(at: modelPath, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        XCTAssertTrue(ModelManager.sortformerModelsExist(in: tempDir))
+    }
 }
