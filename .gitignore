@@ -29,3 +29,7 @@ Sources/Calendar/GoogleOAuthSecrets.swift
 
 # Python cache
 scripts/__pycache__/
+
+# Release artifacts
+*.dmg
+*.dmg.sha256
