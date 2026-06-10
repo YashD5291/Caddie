@@ -50,7 +50,10 @@ download_file "$PARAKEET_REPO" "JointDecision.mlmodelc/weights/weight.bin" \
 download_file "$PARAKEET_REPO" "Preprocessor.mlmodelc/weights/weight.bin" \
     "$PARAKEET_DIR/Preprocessor.mlmodelc/weights/weight.bin" 491072
 
-# Metadata and MIL files (small, existence check only)
+# Metadata, MIL, and analytics files (small, existence check only)
+# IMPORTANT: analytics/coremldata.bin is REQUIRED by CoreML — without it,
+# MLModel(contentsOf:) fails with "Compile the model with Xcode" and
+# triggers a runtime re-download from HuggingFace.
 for model in Encoder Decoder JointDecision Preprocessor; do
     download_file "$PARAKEET_REPO" "${model}.mlmodelc/coremldata.bin" \
         "$PARAKEET_DIR/${model}.mlmodelc/coremldata.bin"
@@ -58,8 +61,8 @@ for model in Encoder Decoder JointDecision Preprocessor; do
         "$PARAKEET_DIR/${model}.mlmodelc/metadata.json"
     download_file "$PARAKEET_REPO" "${model}.mlmodelc/model.mil" \
         "$PARAKEET_DIR/${model}.mlmodelc/model.mil"
-    # Create analytics directory (may be empty but expected by CoreML)
-    mkdir -p "$PARAKEET_DIR/${model}.mlmodelc/analytics"
+    download_file "$PARAKEET_REPO" "${model}.mlmodelc/analytics/coremldata.bin" \
+        "$PARAKEET_DIR/${model}.mlmodelc/analytics/coremldata.bin"
 done
 
 # Vocabulary
@@ -74,23 +77,27 @@ download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/model0/weights/0-weight.
 download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/model1/weights/1-weight.bin" \
     "$SORTFORMER_DIR/SortformerV2.mlmodelc/model1/weights/1-weight.bin" 230428224
 
-# Sortformer V2 metadata (small, existence check only)
+# Sortformer V2 metadata + analytics (small, existence check only)
+# analytics/coremldata.bin is REQUIRED — see ASR comment above.
 download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/coremldata.bin" \
     "$SORTFORMER_DIR/SortformerV2.mlmodelc/coremldata.bin"
 download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/metadata.json" \
     "$SORTFORMER_DIR/SortformerV2.mlmodelc/metadata.json"
+download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/analytics/coremldata.bin" \
+    "$SORTFORMER_DIR/SortformerV2.mlmodelc/analytics/coremldata.bin"
+
 download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/model0/coremldata.bin" \
     "$SORTFORMER_DIR/SortformerV2.mlmodelc/model0/coremldata.bin"
 download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/model0/model.mil" \
     "$SORTFORMER_DIR/SortformerV2.mlmodelc/model0/model.mil"
+download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/model0/analytics/coremldata.bin" \
+    "$SORTFORMER_DIR/SortformerV2.mlmodelc/model0/analytics/coremldata.bin"
+
 download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/model1/coremldata.bin" \
     "$SORTFORMER_DIR/SortformerV2.mlmodelc/model1/coremldata.bin"
 download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/model1/model.mil" \
     "$SORTFORMER_DIR/SortformerV2.mlmodelc/model1/model.mil"
-
-# Create analytics directories (may be empty but expected by CoreML)
-mkdir -p "$SORTFORMER_DIR/SortformerV2.mlmodelc/analytics"
-mkdir -p "$SORTFORMER_DIR/SortformerV2.mlmodelc/model0/analytics"
-mkdir -p "$SORTFORMER_DIR/SortformerV2.mlmodelc/model1/analytics"
+download_file "$SORTFORMER_REPO" "SortformerV2.mlmodelc/model1/analytics/coremldata.bin" \
+    "$SORTFORMER_DIR/SortformerV2.mlmodelc/model1/analytics/coremldata.bin"
 
 echo "=== Models Ready ==="
