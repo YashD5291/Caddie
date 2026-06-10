@@ -30,7 +30,9 @@ final class AudioDeviceManager {
     // MARK: - Private
 
     private let coreAudio = SimplyCoreAudio()
-    // nonisolated(unsafe): accessed only from MainActor methods + deinit (nonisolated)
+    // Set in MainActor methods, read from nonisolated deinit. Plain `nonisolated` is
+    // rejected on a mutable stored property, so `(unsafe)` is required despite Xcode's
+    // misleading "has no effect" warning.
     private nonisolated(unsafe) var observer: NSObjectProtocol?
     private let logger = Logger(subsystem: "com.caddie.app", category: "AudioDeviceManager")
 
@@ -62,6 +64,13 @@ final class AudioDeviceManager {
     func resolvedDeviceID() -> AudioObjectID? {
         guard let uid = selectedDeviceUID else { return nil }
         return AudioDevice.lookup(by: uid)?.id
+    }
+
+    /// Name of the macOS system default input device, used to label the picker
+    /// when the user has selected "System Default" so they see what's actually
+    /// being recorded from (e.g. "Default · MacBook Pro Microphone").
+    var systemDefaultInputName: String? {
+        coreAudio.defaultInputDevice?.name
     }
 
     // MARK: - Private

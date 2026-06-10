@@ -222,12 +222,6 @@ struct OnboardingView: View {
                 .tint(.orange)
                 .controlSize(.large)
 
-                Button("Skip for Now") {
-                    isComplete = true
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             case .signedOut:
                 Image(systemName: "calendar.badge.plus")
                     .font(.system(size: 48, weight: .thin))
@@ -237,7 +231,7 @@ struct OnboardingView: View {
                 Text("Connect Google Calendar")
                     .font(.headline)
 
-                Text("Caddie can automatically detect and record your Google Calendar meetings.")
+                Text("Caddie uses Google Calendar to detect meetings and show your schedule. Sign in to continue.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -249,12 +243,6 @@ struct OnboardingView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
                 .controlSize(.large)
-
-                Button("Skip for Now") {
-                    isComplete = true
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: 400)

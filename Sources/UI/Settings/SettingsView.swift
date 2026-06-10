@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var micStatus: PermissionStatus = .undetermined
     @State private var screenStatus: PermissionStatus = .undetermined
     @State private var accessibilityStatus: PermissionStatus = .undetermined
+    @State private var notificationAuth: NotificationManager.AuthState = .undetermined
     @State private var storageUsed: String = "Calculating..."
 
     var body: some View {
@@ -27,6 +28,9 @@ struct SettingsView: View {
             launchAtLogin = SMAppService.mainApp.status == .enabled
             refreshPermissions()
             refreshStorage()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissions()
         }
     }
 
@@ -100,9 +104,16 @@ struct SettingsView: View {
             permissionRow("Microphone", status: micStatus)
             permissionRow("Screen Recording", status: screenStatus)
             permissionRow("Accessibility", status: accessibilityStatus)
+            notificationRow
 
-            Button("Open System Settings") {
+            Button("Open Privacy Settings") {
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy")!)
+            }
+
+            if notificationAuth != .authorized {
+                Button("Open Notification Settings") {
+                    NSWorkspace.shared.open(NotificationManager.notificationSettingsURL)
+                }
             }
         }
     }
@@ -113,6 +124,21 @@ struct SettingsView: View {
             Spacer()
             switch status {
             case .granted:
+                Text("Granted").foregroundStyle(.green).font(.caption)
+            case .denied:
+                Text("Denied").foregroundStyle(.red).font(.caption)
+            case .undetermined:
+                Text("Not Set").foregroundStyle(.secondary).font(.caption)
+            }
+        }
+    }
+
+    private var notificationRow: some View {
+        HStack {
+            Text("Notifications")
+            Spacer()
+            switch notificationAuth {
+            case .authorized:
                 Text("Granted").foregroundStyle(.green).font(.caption)
             case .denied:
                 Text("Denied").foregroundStyle(.red).font(.caption)
@@ -184,6 +210,9 @@ struct SettingsView: View {
         micStatus = Permissions.microphone
         screenStatus = Permissions.screenRecording
         accessibilityStatus = Permissions.accessibility
+        Task { @MainActor in
+            notificationAuth = await NotificationManager.currentAuthState()
+        }
     }
 
     private func refreshStorage() {
