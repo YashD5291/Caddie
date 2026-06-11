@@ -174,6 +174,15 @@ final class AudioRecorder {
         flushTimer?.cancel()
         flushTimer = nil
 
+        // Clear the live tee BEFORE the final drain. This final flushRingBuffer() may
+        // run off-main (finalizeRecording is invoked on the caller's thread, e.g. the
+        // coordinator actor's executor on the switchDevice catastrophic path), and the
+        // tee closure does MainActor.assumeIsolated -> it would trap off-main. The live
+        // tee is display-only and the recording is ending, so the drained samples have
+        // no further use for live text; clearing prevents the MainActor assumption from
+        // trapping. Covers all final-drain paths (stop() and switchDevice failure).
+        onSamples = nil
+
         // Final drain of any remaining samples
         flushRingBuffer()
 

@@ -94,6 +94,12 @@ actor RecordingCoordinator {
     }
 
     /// Stop the recorder if a recording is in progress.
+    ///
+    /// Shutdown helper — by design this bypasses the normal live-transcription
+    /// teardown (no liveTranscriber.stop() here). recorder.stop()'s finalize clears
+    /// the onSamples tee itself before its final drain, so the display-only live
+    /// transcriber is left to be torn down by the regular stop/error paths or by
+    /// process exit; no tee outlives this call.
     func stop() {
         if case .recording = state {
             recorder.stop()
@@ -256,10 +262,16 @@ actor RecordingCoordinator {
             // Live transcription: display-only side effect of entering .recording.
             // The engine already owns its ASR models. Start failures are logged
             // inside LiveTranscriber and swallowed — recording proceeds with no
-            // live text. onSamples fires on the main thread (recorder convention),
-            // and LiveTranscriber.feed is @MainActor, so hop via assumeIsolated.
+            // live text. onSamples fires on the main thread from the recorder's
+            // periodic flush timer (DispatchSource on .main), so the assumeIsolated
+            // hop is safe — LiveTranscriber.feed is @MainActor. The final drain never
+            // tees: the recorder clears onSamples before its final flushRingBuffer().
             if let liveTranscriber {
                 await liveTranscriber.start()
+                // Strong capture of liveTranscriber is intentional: every termination
+                // path (stop, error, device-disconnect, and the recorder's own
+                // finalize) detaches onSamples, so the closure is short-lived and
+                // never forms a retain cycle back to the coordinator.
                 recorder.onSamples = { samples in
                     MainActor.assumeIsolated {
                         liveTranscriber.feed(samples: samples)

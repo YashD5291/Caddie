@@ -39,6 +39,17 @@ final class RecordingCoordinatorLiveTranscriptionTests: XCTestCase {
         )
     }
 
+    private func makeCoordinatorWithoutLiveTranscriber() -> RecordingCoordinator {
+        RecordingCoordinator(
+            database: db,
+            recorder: AudioRecorder(),
+            pipeline: pipeline,
+            detector: MeetingDetector(),
+            audioDeviceManager: nil,
+            liveTranscriber: nil
+        )
+    }
+
     /// On manual start, the coordinator starts the live transcriber and attaches
     /// the onSamples tee so drained capture batches flow to it.
     func testStartRecordingStartsLiveTranscriberAndAttachesTee() async {
@@ -81,5 +92,22 @@ final class RecordingCoordinatorLiveTranscriptionTests: XCTestCase {
         let attached = await coordinator.isLiveTeeAttached
         XCTAssertFalse(attached, "onSamples must be detached on device disconnect")
         XCTAssertEqual(engine.cancelCallCount, 1, "LiveTranscriber.stop should cancel the engine on disconnect")
+    }
+
+    /// With no live transcriber injected, recording still works: the coordinator
+    /// enters .recording and never attaches the onSamples tee. Locks in that live
+    /// text is an optional display-only add-on — recording functions without it.
+    func testStartRecordingWorksWithoutLiveTranscriber() async {
+        let coordinator = makeCoordinatorWithoutLiveTranscriber()
+        await coordinator.handle(.manualStart(title: "No Live Test"))
+        try? await Task.sleep(for: .milliseconds(100))
+
+        let state = await coordinator.state
+        guard case .recording = state else {
+            XCTFail("Expected .recording without a live transcriber, got \(state)")
+            return
+        }
+        let attached = await coordinator.isLiveTeeAttached
+        XCTAssertFalse(attached, "onSamples tee must not be attached when liveTranscriber is nil")
     }
 }
