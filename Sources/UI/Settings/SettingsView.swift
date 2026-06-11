@@ -5,7 +5,9 @@ private let settingsLogger = CaddieLogger.app
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.sparkleUpdaterController) private var updaterController
     @State private var launchAtLogin = false
+    @State private var automaticallyChecksForUpdates = false
     @State private var gracePeriod: Double = 10
     @State private var micStatus: PermissionStatus = .undetermined
     @State private var screenStatus: PermissionStatus = .undetermined
@@ -18,6 +20,7 @@ struct SettingsView: View {
             generalSection
             audioInputSection
             GoogleAccountSection()
+            updatesSection
             permissionsSection
             storageSection
             aboutSection
@@ -26,6 +29,9 @@ struct SettingsView: View {
         .frame(width: 450)
         .onAppear {
             launchAtLogin = SMAppService.mainApp.status == .enabled
+            if let updaterController {
+                automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates
+            }
             refreshPermissions()
             refreshStorage()
         }
@@ -94,6 +100,28 @@ struct SettingsView: View {
             Text("Choose which microphone Caddie records from.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+        }
+    }
+
+    // MARK: - Updates
+
+    @ViewBuilder
+    private var updatesSection: some View {
+        if let updaterController {
+            Section("Updates") {
+                Toggle("Automatically check for updates", isOn: $automaticallyChecksForUpdates)
+                    .onChange(of: automaticallyChecksForUpdates) { _, newValue in
+                        updaterController.updater.automaticallyChecksForUpdates = newValue
+                    }
+
+                Button("Check Now") {
+                    updaterController.checkForUpdates(nil)
+                }
+
+                Text("Updates are delivered securely from GitHub Releases.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 
