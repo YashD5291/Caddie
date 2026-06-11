@@ -15,6 +15,9 @@ final class AudioRecorder {
     /// Called on the main thread with each drained batch of samples (16 kHz mono Int16),
     /// AFTER they are written to the WAV. nil when live transcription is inactive — when
     /// nil, behavior is identical to today (pure WAV write, real-time thread untouched).
+    ///
+    /// Main-thread only; deliberately not @Sendable — see LiveTranscriber.feed's
+    /// MainActor assertion for the runtime check.
     var onSamples: (([Int16]) -> Void)?
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "AudioRecorder")
@@ -242,8 +245,8 @@ final class AudioRecorder {
         writeToFile(samples: samples, frameCount: UInt32(read))
 
         // Tee the same samples to the live transcriber after the WAV write.
-        // Copy into a Swift array so the callback never touches the soon-to-be
-        // deallocated buffer. No-op allocation when onSamples is nil.
+        // Copy into a Swift array because the raw buffer is owned by this function
+        // and freed at scope exit (via defer above). No-op allocation when onSamples is nil.
         if let onSamples {
             onSamples(Array(UnsafeBufferPointer(start: samples, count: read)))
         }
