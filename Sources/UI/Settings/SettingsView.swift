@@ -7,7 +7,6 @@ struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.sparkleUpdaterController) private var updaterController
     @State private var launchAtLogin = false
-    @State private var automaticallyChecksForUpdates = false
     @State private var gracePeriod: Double = 10
     @State private var micStatus: PermissionStatus = .undetermined
     @State private var screenStatus: PermissionStatus = .undetermined
@@ -29,9 +28,6 @@ struct SettingsView: View {
         .frame(width: 450)
         .onAppear {
             launchAtLogin = SMAppService.mainApp.status == .enabled
-            if let updaterController {
-                automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates
-            }
             refreshPermissions()
             refreshStorage()
         }
@@ -109,10 +105,10 @@ struct SettingsView: View {
     private var updatesSection: some View {
         if let updaterController {
             Section("Updates") {
-                Toggle("Automatically check for updates", isOn: $automaticallyChecksForUpdates)
-                    .onChange(of: automaticallyChecksForUpdates) { _, newValue in
-                        updaterController.updater.automaticallyChecksForUpdates = newValue
-                    }
+                Toggle("Automatically check for updates", isOn: Binding(
+                    get: { updaterController.updater.automaticallyChecksForUpdates },
+                    set: { updaterController.updater.automaticallyChecksForUpdates = $0 }
+                ))
 
                 Button("Check Now") {
                     updaterController.checkForUpdates(nil)

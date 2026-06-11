@@ -40,6 +40,7 @@ if echo "$NOTARY_OUTPUT" | grep -q "status: Accepted"; then
 
     # Regenerate checksum after stapling (stapling modifies the DMG)
     shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+
     # --- Generate, sign, and attach the Sparkle appcast ---
     # SUFeedURL points at releases/latest/download/appcast.xml, so EVERY future
     # release MUST attach a freshly generated appcast.xml here — otherwise Sparkle
@@ -48,7 +49,9 @@ if echo "$NOTARY_OUTPUT" | grep -q "status: Accepted"; then
     echo "=== Generating Sparkle appcast ==="
 
     # Sparkle tools live in DerivedData (multiple copies possible); pick the first existing.
-    SPARKLE_BIN=$(ls -d ~/Library/Developer/Xcode/DerivedData/Caddie-*/SourcePackages/artifacts/sparkle/Sparkle/bin 2>/dev/null | head -1)
+    SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData -maxdepth 6 \
+        -path "*/Caddie-*/SourcePackages/artifacts/sparkle/Sparkle/bin" \
+        -type d 2>/dev/null | head -1)
     if [[ -z "$SPARKLE_BIN" || ! -x "$SPARKLE_BIN/generate_appcast" ]]; then
         echo "ERROR: Sparkle tools not found in DerivedData. Build the app once (make dmg) so SPM resolves Sparkle, then retry."
         exit 1
