@@ -7,7 +7,7 @@ final class LiveTranscriberTests: XCTestCase {
 
     // MARK: - Int16 -> AVAudioPCMBuffer conversion
 
-    func testInt16ToBufferProducesMono16kFloatBuffer() {
+    func testInt16ToBufferProducesMono16kFloatBuffer() throws {
         let samples: [Int16] = [0, Int16.max, Int16.min, 16384]
         let buffer = LiveTranscriber.makeBuffer(from: samples)
 
@@ -16,7 +16,7 @@ final class LiveTranscriberTests: XCTestCase {
         XCTAssertEqual(buffer.format.commonFormat, .pcmFormatFloat32)
         XCTAssertEqual(Int(buffer.frameLength), samples.count)
 
-        let ch = buffer.floatChannelData![0]
+        let ch = try XCTUnwrap(buffer.floatChannelData)[0]
         XCTAssertEqual(ch[0], 0.0, accuracy: 0.0001)
         XCTAssertEqual(ch[1], 1.0, accuracy: 0.001)        // Int16.max / 32768 ~ 0.99997
         XCTAssertEqual(ch[2], -1.0, accuracy: 0.001)       // Int16.min / 32768 == -1.0
@@ -47,8 +47,14 @@ final class LiveTranscriberTests: XCTestCase {
         // Then a confirmed update promotes it to stable.
         engine.emit(text: "hello world", isConfirmed: true)
 
-        // Allow the consumer task to drain the stream.
-        try? await Task.sleep(for: .milliseconds(50))
+        // Deterministically drain: both updates are buffered in the AsyncStream.
+        // The @MainActor consumer task only runs while the test suspends, so a few
+        // cooperative yields let it process the buffered items without any sleep.
+        // stop() then cancels the consumer + finishes the stream before asserting.
+        for _ in 0..<10 where received.count < 2 {
+            await Task.yield()
+        }
+        await transcriber.stop()
 
         XCTAssertEqual(received.count, 2)
         XCTAssertEqual(received[0].0, "")              // confirmed still empty
@@ -79,5 +85,30 @@ final class LiveTranscriberTests: XCTestCase {
         // After a failed start, feed/stop are safe no-ops.
         transcriber.feed(samples: [1, 2, 3])
         await transcriber.stop()
+    }
+
+    func testFeedBeforeStartIsNoOp() async {
+        let engine = MockStreamingEngine()
+        let transcriber = LiveTranscriber(engine: engine)
+
+        // No start() called: feed must not forward anything to the engine.
+        transcriber.feed(samples: [1, 2, 3])
+
+        XCTAssertEqual(engine.streamedBuffers.count, 0)
+    }
+
+    func testFeedAfterStartForwardsOneBufferPerCall() async {
+        let engine = MockStreamingEngine()
+        let transcriber = LiveTranscriber(engine: engine)
+        await transcriber.start()
+
+        transcriber.feed(samples: [1, 2, 3])
+        transcriber.feed(samples: [4, 5, 6])
+
+        // feed dispatches an unstructured Task that awaits engine.stream; wait for
+        // both hand-offs deterministically rather than sleeping/polling.
+        await engine.waitForBuffers(count: 2)
+
+        XCTAssertEqual(engine.streamedBuffers.count, 2)
     }
 }

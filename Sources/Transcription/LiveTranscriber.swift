@@ -1,15 +1,15 @@
 import AVFoundation
 import FluidAudio
-import Foundation
 
 /// Display-only live transcriber. Wraps a StreamingTranscriptionEngine (FluidAudio
 /// by default) and pushes (confirmed, volatile) text to `onUpdate` on the main actor.
 ///
 /// Error policy (spec): nothing here ever propagates to callers. Any failure is
 /// logged via CaddieLogger.transcription and the transcriber stops; recording
-/// continues untouched. Lives on @MainActor because its public surface (`feed` from
-/// the recorder's main-thread flush, `onUpdate` to the UI) is main-thread; it bridges
-/// to the StreamingAsrManager actor with `await`.
+/// continues untouched. Lives on @MainActor because its public surface (`onUpdate`
+/// to the UI) is main-thread; it bridges to the StreamingAsrManager actor with
+/// `await`. The recorder is expected to call `feed` from the main thread by
+/// convention — `feed` asserts that isolation rather than relying on it silently.
 @MainActor
 final class LiveTranscriber {
 
@@ -41,7 +41,7 @@ final class LiveTranscriber {
         isRunning = true
 
         let stream = engine.updates()
-        consumerTask = Task { [weak self] in
+        consumerTask = Task { @MainActor [weak self] in
             for await update in stream {
                 guard let self else { break }
                 self.apply(update)
@@ -51,8 +51,13 @@ final class LiveTranscriber {
 
     /// Convert a drained batch of 16 kHz mono Int16 samples and hand to the engine.
     /// Non-blocking: the conversion is cheap and synchronous, but `stream(_:)` is
-    /// actor-isolated, so it is dispatched on a detached-from-flush Task.
+    /// actor-isolated, so it is handed off on an unstructured `Task`. That task is
+    /// NOT detached — it inherits this method's @MainActor context until it suspends
+    /// on the `await`. Ordering across calls is provided by the engine actor's
+    /// mailbox (calls land in submission order); there is no back-pressure here, which
+    /// is acceptable because the output is display-only text, not durable data.
     func feed(samples: [Int16]) {
+        MainActor.assertIsolated("LiveTranscriber.feed must be called on the main actor")
         guard isRunning, !samples.isEmpty else { return }
         let buffer = Self.makeBuffer(from: samples)
         Task { [engine] in
