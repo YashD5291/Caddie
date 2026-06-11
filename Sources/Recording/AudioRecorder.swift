@@ -12,6 +12,14 @@ final class AudioRecorder {
     /// Called when the input device disconnects mid-recording.
     var onDeviceDisconnected: (@Sendable () -> Void)?
 
+    /// Called on the main thread with each drained batch of samples (16 kHz mono Int16),
+    /// AFTER they are written to the WAV. nil when live transcription is inactive — when
+    /// nil, behavior is identical to today (pure WAV write, real-time thread untouched).
+    ///
+    /// Main-thread only; deliberately not @Sendable — see LiveTranscriber.feed's
+    /// MainActor assertion for the runtime check.
+    var onSamples: (([Int16]) -> Void)?
+
     private let logger = Logger(subsystem: "com.caddie.app", category: "AudioRecorder")
 
     private let capture = MicrophoneCapture()
@@ -166,6 +174,15 @@ final class AudioRecorder {
         flushTimer?.cancel()
         flushTimer = nil
 
+        // Clear the live tee BEFORE the final drain. This final flushRingBuffer() may
+        // run off-main (finalizeRecording is invoked on the caller's thread, e.g. the
+        // coordinator actor's executor on the switchDevice catastrophic path), and the
+        // tee closure does MainActor.assumeIsolated -> it would trap off-main. The live
+        // tee is display-only and the recording is ending, so the drained samples have
+        // no further use for live text; clearing prevents the MainActor assumption from
+        // trapping. Covers all final-drain paths (stop() and switchDevice failure).
+        onSamples = nil
+
         // Final drain of any remaining samples
         flushRingBuffer()
 
@@ -235,6 +252,13 @@ final class AudioRecorder {
         guard read > 0 else { return }
 
         writeToFile(samples: samples, frameCount: UInt32(read))
+
+        // Tee the same samples to the live transcriber after the WAV write.
+        // Copy into a Swift array because the raw buffer is owned by this function
+        // and freed at scope exit (via defer above). No-op allocation when onSamples is nil.
+        if let onSamples {
+            onSamples(Array(UnsafeBufferPointer(start: samples, count: read)))
+        }
     }
 
     private func writeToFile(samples: UnsafeMutablePointer<Int16>, frameCount: UInt32) {
@@ -254,6 +278,20 @@ final class AudioRecorder {
             logger.error("Failed to write audio data: OSStatus \(status)")
         }
     }
+
+    // MARK: - Testing
+
+    #if DEBUG
+    /// Test-only: enqueue samples into the ring buffer and drain once, exercising
+    /// the same flush path (WAV write skipped when no audioFile) and the onSamples tee.
+    func testFeedAndFlush(_ samples: [Int16]) {
+        if ringBuffer == nil {
+            ringBuffer = SPSCRingBuffer(capacity: Self.ringBufferCapacity)
+        }
+        samples.withUnsafeBufferPointer { _ = ringBuffer?.write($0, count: samples.count) }
+        flushRingBuffer()
+    }
+    #endif
 
     // MARK: - Errors
 

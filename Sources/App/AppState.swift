@@ -25,6 +25,10 @@ final class AppState {
     var currentMeetingTitle: String?
     var recordingStartTime: Date?
     var transcriptionProgress: Double = 0
+    /// Live (display-only) transcript shown in the recording card. Confirmed text is
+    /// stable; volatile is the still-revising tail. Cleared on .idle and on new record start.
+    var liveConfirmedText: String = ""
+    var liveVolatileText: String = ""
     var hasOpenedMainWindow = false
     var hasCompletedOnboarding: Bool {
         get { UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") }
@@ -124,12 +128,25 @@ final class AppState {
                 return
             }
             let deviceManager = audioDeviceManager
+
+            // Live transcription is display-only and only available when ASR models loaded.
+            // The streaming engine owns the ASR models; the coordinator passes none.
+            var liveTranscriber: LiveTranscriber?
+            if let asrModels = modelManager.asrModels {
+                let lt = LiveTranscriber(engine: FluidStreamingEngine(models: asrModels))
+                lt.onUpdate = { [weak self] confirmed, volatile in
+                    self?.applyLiveTranscript(confirmed: confirmed, volatile: volatile)
+                }
+                liveTranscriber = lt
+            }
+
             let newCoordinator = RecordingCoordinator(
                 database: db,
                 recorder: AudioRecorder(),
                 pipeline: pipeline,
                 detector: MeetingDetector(),
-                audioDeviceManager: deviceManager
+                audioDeviceManager: deviceManager,
+                liveTranscriber: liveTranscriber
             )
 
             // 6. Wire coordinator state changes to observable properties
@@ -145,10 +162,12 @@ final class AppState {
                         self.currentMeetingTitle = nil
                         self.recordingStartTime = nil
                         self.pipelineStep = .idle
+                        self.clearLiveTranscript()
                     case .recording:
                         self.status = .recording
                         self.recordingStartTime = Date()
                         self.lastRecordingError = nil
+                        self.clearLiveTranscript()
                     case .transcribing:
                         self.status = .transcribing
                     case .error(_, let error):
@@ -209,6 +228,18 @@ final class AppState {
         )
         await service.start()
         return service
+    }
+
+    // MARK: - Live Transcript
+
+    func applyLiveTranscript(confirmed: String, volatile: String) {
+        liveConfirmedText = confirmed
+        liveVolatileText = volatile
+    }
+
+    func clearLiveTranscript() {
+        liveConfirmedText = ""
+        liveVolatileText = ""
     }
 
     // MARK: - UI Actions (delegate to coordinator)

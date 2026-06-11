@@ -31,6 +31,7 @@ Caddie lives in your menu bar and watches for meetings. When one starts, it reco
 | **Detect** | Auto-detects Zoom, Teams, Meet, Slack, Discord, Webex, FaceTime — or via Google Calendar |
 | **Record** | Stereo capture — system audio + microphone, with configurable input device |
 | **Transcribe** | On-device ASR with speaker diarization via Apple Neural Engine |
+| **Live** | Transcript streams into the meeting view as you record — final transcript with speaker labels still produced after recording ends, all on-device |
 | **Store** | Searchable local database with full-text search across all transcripts |
 | **Calendar** | Google Calendar integration — sign in via OAuth2, auto-detect remote meetings |
 | **Manual** | Start/stop recording anytime from the menu bar |
