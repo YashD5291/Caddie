@@ -19,6 +19,11 @@ actor RecordingCoordinator {
     private let detector: MeetingDetector
     private let audioDeviceManager: AudioDeviceManager?
 
+    /// Display-only live transcriber, started/stopped around the recording lifecycle.
+    /// nil when ASR models are unavailable (AppState constructs it only once models
+    /// are loaded). The engine owns its ASR models — the coordinator passes none.
+    private let liveTranscriber: LiveTranscriber?
+
     // MARK: - Callbacks
 
     private var onStateChange: (@Sendable (RecordingState) -> Void)?
@@ -33,13 +38,15 @@ actor RecordingCoordinator {
         recorder: AudioRecorder,
         pipeline: TranscriptionPipeline,
         detector: MeetingDetector,
-        audioDeviceManager: AudioDeviceManager? = nil
+        audioDeviceManager: AudioDeviceManager? = nil,
+        liveTranscriber: LiveTranscriber? = nil
     ) {
         self.database = database
         self.recorder = recorder
         self.pipeline = pipeline
         self.detector = detector
         self.audioDeviceManager = audioDeviceManager
+        self.liveTranscriber = liveTranscriber
     }
 
     // MARK: - Public API
@@ -93,6 +100,17 @@ actor RecordingCoordinator {
         }
         logger.info("RecordingCoordinator stopped")
     }
+
+    // MARK: - Test Support
+
+    #if DEBUG
+    /// Whether the live-transcription sample tee is currently attached to the
+    /// recorder. Actor-isolated so the recorder stays confined to this domain;
+    /// lets tests assert tee attach/detach without sharing the recorder.
+    var isLiveTeeAttached: Bool {
+        recorder.onSamples != nil
+    }
+    #endif
 
     // MARK: - Convenience
 
@@ -234,6 +252,21 @@ actor RecordingCoordinator {
             recorder.onDeviceDisconnected = { [self] in
                 Task { await self.handle(.deviceDisconnected) }
             }
+
+            // Live transcription: display-only side effect of entering .recording.
+            // The engine already owns its ASR models. Start failures are logged
+            // inside LiveTranscriber and swallowed — recording proceeds with no
+            // live text. onSamples fires on the main thread (recorder convention),
+            // and LiveTranscriber.feed is @MainActor, so hop via assumeIsolated.
+            if let liveTranscriber {
+                await liveTranscriber.start()
+                recorder.onSamples = { samples in
+                    MainActor.assumeIsolated {
+                        liveTranscriber.feed(samples: samples)
+                    }
+                }
+            }
+
             NotificationManager.recordingStarted(title: meeting.title)
             logger.info("Recording started for meeting \(meetingId)")
         } catch {
@@ -244,7 +277,9 @@ actor RecordingCoordinator {
 
     private func executeStopAndTranscribe(meetingId: String) async {
         recorder.onDeviceDisconnected = nil  // Clear before stop to avoid re-entrant disconnect
+        recorder.onSamples = nil             // Detach live tee before stopping capture
         recorder.stop()
+        await liveTranscriber?.stop()        // Cancel streaming before batch pipeline (no ANE contention)
 
         let endTime = ISO8601DateFormatter().string(from: Date())
 
@@ -335,6 +370,8 @@ actor RecordingCoordinator {
     // failure), the UPDATE will affect 0 rows. This is safe -- the error is still
     // logged and the state machine transitions correctly to .error -> .idle.
     private func executeNotifyError(meetingId: String, error: Error) async {
+        recorder.onSamples = nil          // Tear down live tee on the error path too
+        await liveTranscriber?.stop()
         logger.error("Meeting \(meetingId) ended in error state: \(error.localizedDescription)")
         do {
             try await database.dbWriter.write { dbConn in
