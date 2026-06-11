@@ -40,10 +40,56 @@ if echo "$NOTARY_OUTPUT" | grep -q "status: Accepted"; then
 
     # Regenerate checksum after stapling (stapling modifies the DMG)
     shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+    # --- Generate, sign, and attach the Sparkle appcast ---
+    # SUFeedURL points at releases/latest/download/appcast.xml, so EVERY future
+    # release MUST attach a freshly generated appcast.xml here — otherwise Sparkle
+    # auto-updates silently stall on whatever release last carried one.
+    echo ""
+    echo "=== Generating Sparkle appcast ==="
+
+    # Sparkle tools live in DerivedData (multiple copies possible); pick the first existing.
+    SPARKLE_BIN=$(ls -d ~/Library/Developer/Xcode/DerivedData/Caddie-*/SourcePackages/artifacts/sparkle/Sparkle/bin 2>/dev/null | head -1)
+    if [[ -z "$SPARKLE_BIN" || ! -x "$SPARKLE_BIN/generate_appcast" ]]; then
+        echo "ERROR: Sparkle tools not found in DerivedData. Build the app once (make dmg) so SPM resolves Sparkle, then retry."
+        exit 1
+    fi
+
+    # generate_appcast scans a directory and would include ANY DMGs present, so
+    # stage only the newly stapled DMG in an isolated temp dir.
+    APPCAST_STAGING=$(mktemp -d)
+    trap 'rm -rf "$APPCAST_STAGING"' EXIT
+    cp "$DMG_PATH" "$APPCAST_STAGING/"
+
+    # Sign each enclosure with the Keychain EdDSA key (automatic) and point
+    # enclosure URLs at this release's GitHub asset path.
+    "$SPARKLE_BIN/generate_appcast" "$APPCAST_STAGING" \
+        --download-url-prefix "https://github.com/YashD5291/Caddie/releases/download/v${VERSION}/"
+    cp "$APPCAST_STAGING/appcast.xml" "$PROJECT_DIR/appcast.xml"
+
+    # Verify the appcast is valid before attaching it.
+    grep -q "sparkle:edSignature" "$PROJECT_DIR/appcast.xml" || {
+        echo "ERROR: appcast.xml missing edSignature — Keychain signing failed"
+        exit 1
+    }
+    grep -q "releases/download/v${VERSION}/${DMG_NAME}" "$PROJECT_DIR/appcast.xml" || {
+        echo "ERROR: appcast.xml enclosure URL wrong"
+        exit 1
+    }
+
+    # Attach to the GitHub release if possible; otherwise print manual instructions.
+    if command -v gh >/dev/null 2>&1 && gh release view "v${VERSION}" >/dev/null 2>&1; then
+        gh release upload "v${VERSION}" "$PROJECT_DIR/appcast.xml" --clobber
+        echo "Uploaded appcast.xml to release v${VERSION}."
+    else
+        echo "NOTE: Attach appcast.xml to the GitHub release v${VERSION} manually (gh not available or release not yet created)."
+        echo "      Run after creating the release: gh release upload v${VERSION} \"$PROJECT_DIR/appcast.xml\" --clobber"
+    fi
+
     echo ""
     echo "=== Release ready ==="
     echo "  DMG:      $DMG_PATH"
     echo "  Checksum: $DMG_PATH.sha256"
+    echo "  Appcast:  $PROJECT_DIR/appcast.xml"
     ls -lh "$DMG_PATH"
     cat "$DMG_PATH.sha256"
 else

@@ -80,6 +80,14 @@ Grab the latest `.dmg` from [Releases](../../releases), mount it, and drag Caddi
 > **First launch:** Caddie is signed and notarized with Apple. Just drag to Applications and open.
 > Then open Caddie normally from Launchpad or Applications.
 
+### Auto-updates
+
+Caddie updates itself via [Sparkle](https://sparkle-project.org), delivered from GitHub Releases — no need to revisit a download page. The app checks automatically (toggle this under **Settings → Updates**), and you can trigger a check any time from the menu bar (**Check for Updates…**) or **Settings → Updates → Check Now**.
+
+Each release attaches a signed `appcast.xml`; enclosures are signed with an EdDSA key held in the developer's login Keychain (only the public key ships in the app). `scripts/release.sh` generates and uploads this appcast as part of every release.
+
+> **Note:** v1.2.0 shipped *before* this wiring existed, so it carries no public key or appcast. Auto-updates begin with the first release after v1.2.0 — that is the earliest build that can both verify and advertise updates. This is expected, not a defect.
+
 ### Build from Source
 
 ```bash
