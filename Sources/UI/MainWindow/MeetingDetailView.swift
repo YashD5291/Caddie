@@ -216,6 +216,8 @@ struct MeetingDetailView: View {
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
+    // MARK: - Live Transcript
+
     /// Scrolling, auto-pinned-to-bottom live transcript. Confirmed text in `.primary`,
     /// volatile tail in `.secondary`. Shows "Listening…" until the first text arrives.
     @ViewBuilder
@@ -226,24 +228,26 @@ struct MeetingDetailView: View {
 
         ScrollViewReader { proxy in
             ScrollView {
-                Group {
-                    if isEmpty {
-                        Text("Listening…")
-                            .font(.callout)
-                            .foregroundStyle(.tertiary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        (Text(confirmed).foregroundStyle(.primary)
-                            + Text(confirmed.isEmpty ? "" : " ")
-                            + Text(volatile).foregroundStyle(.secondary))
-                            .font(.callout)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(spacing: 0) {
+                    Group {
+                        if isEmpty {
+                            Text("Listening…")
+                                .font(.callout)
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            (Text(confirmed).foregroundStyle(.primary)
+                                + Text(confirmed.isEmpty ? "" : " ")
+                                + Text(volatile).foregroundStyle(.secondary))
+                                .font(.callout)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
+                    Color.clear.frame(height: 1).id("liveTranscriptBottom")
                 }
-                .id("liveTranscriptBottom")
+                .padding(10)
             }
             .frame(height: 140)
-            .padding(10)
             .background(.background.opacity(0.4), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .onChange(of: confirmed) { _, _ in
                 withAnimation(.easeOut(duration: 0.15)) {
@@ -251,9 +255,7 @@ struct MeetingDetailView: View {
                 }
             }
             .onChange(of: volatile) { _, _ in
-                withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo("liveTranscriptBottom", anchor: .bottom)
-                }
+                proxy.scrollTo("liveTranscriptBottom", anchor: .bottom)
             }
         }
     }
