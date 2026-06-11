@@ -1,5 +1,22 @@
 import SwiftUI
 import UserNotifications
+import Sparkle
+
+// MARK: - Sparkle Updater Environment
+
+/// Carries the single app-scoped Sparkle updater controller into SwiftUI views
+/// (menu bar + settings) the same way `appState` is injected. There is exactly
+/// one controller for the app lifetime; views read it from here.
+private struct SparkleUpdaterControllerKey: EnvironmentKey {
+    static let defaultValue: SPUStandardUpdaterController? = nil
+}
+
+extension EnvironmentValues {
+    var sparkleUpdaterController: SPUStandardUpdaterController? {
+        get { self[SparkleUpdaterControllerKey.self] }
+        set { self[SparkleUpdaterControllerKey.self] = newValue }
+    }
+}
 
 @main
 struct CaddieApp: App {
@@ -18,6 +35,7 @@ struct CaddieApp: App {
         MenuBarExtra {
             MenuBarView()
                 .environment(appState)
+                .environment(\.sparkleUpdaterController, appDelegate.updaterController)
                 .onAppear {
                     // MenuBarExtra is created at launch — use this to open the main window.
                     // SwiftUI Window scenes are lazy and won't auto-show alongside MenuBarExtra.
@@ -52,6 +70,7 @@ struct CaddieApp: App {
         Settings {
             SettingsView()
                 .environment(appState)
+                .environment(\.sparkleUpdaterController, appDelegate.updaterController)
         }
     }
 }
@@ -62,6 +81,15 @@ struct CaddieApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var appState: AppState?
     var openWindowAction: OpenWindowAction?
+
+    /// The single, app-scoped Sparkle updater. `startingUpdater: true` begins
+    /// automatic-check scheduling at launch. Initialized on MainActor (AppDelegate
+    /// is @MainActor), satisfying Swift 6 isolation.
+    let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         CaddieLogger.app.info("Caddie launched")

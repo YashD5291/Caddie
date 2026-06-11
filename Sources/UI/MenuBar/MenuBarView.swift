@@ -3,6 +3,7 @@ import SwiftUI
 struct MenuBarView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.sparkleUpdaterController) private var updaterController
 
     var body: some View {
         statusSection
@@ -72,6 +73,14 @@ struct MenuBarView: View {
 
         SettingsLink {
             Label("Settings...", systemImage: "gear")
+        }
+
+        if let updaterController {
+            Button {
+                updaterController.checkForUpdates(nil)
+            } label: {
+                Label("Check for Updates...", systemImage: "arrow.down.circle")
+            }
         }
     }
 
