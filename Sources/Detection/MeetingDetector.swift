@@ -36,6 +36,11 @@ final class MeetingDetector {
     private var graceTimer: Timer?
     private var graceElapsed: TimeInterval = 0
 
+    /// Calendar event IDs already prompted this session. Prevents re-prompting for the
+    /// same in-progress event when the calendar service re-fires its active signal.
+    /// Cleared when the event deactivates (so a re-occurrence can prompt again) and on stop().
+    private var promptedEventIDs: Set<String> = []
+
     // MARK: - Lifecycle
 
     func start() {
@@ -76,6 +81,7 @@ final class MeetingDetector {
         activeSignals = []
         isDetectingMeeting = false
         currentMeeting = nil
+        promptedEventIDs = []
     }
 
     // MARK: - Signal Handling
@@ -89,6 +95,40 @@ final class MeetingDetector {
         // Add new signal if active
         if signal.isActive {
             activeSignals.append(signal)
+        }
+
+        // Calendar special-case: a lone active .googleCalendar signal fires the
+        // notification prompt directly. The DecisionEngine requires >=2 active signals,
+        // but the other monitors (audio/mic/window) don't run in production, so a single
+        // calendar signal must bypass the engine to reach the user. The user decides
+        // whether to record via the notification — we do NOT set currentMeeting here.
+        if signal.source == .googleCalendar {
+            if signal.isActive {
+                if currentMeeting == nil {
+                    let eventID = signal.calendarEventID
+                    let alreadyPrompted = eventID.map { promptedEventIDs.contains($0) } ?? false
+                    if !alreadyPrompted {
+                        cancelGrace()
+                        onMeetingPrompt?(signal.calendarEvent ?? "Meeting", eventID)
+                        if let eventID { promptedEventIDs.insert(eventID) }
+                    }
+                }
+            } else {
+                // Event ended: drop its prompted state so a future re-occurrence can prompt.
+                // A deactivating signal with no eventID (e.g. sign-out teardown from
+                // GoogleCalendarService.stop()) clears all prompted state.
+                if let eventID = signal.calendarEventID {
+                    promptedEventIDs.remove(eventID)
+                } else {
+                    promptedEventIDs.removeAll()
+                }
+            }
+            // Calendar signals never drive DecisionEngine-based currentMeeting tracking,
+            // but a deactivating signal must still let grace/teardown run if a meeting
+            // was being tracked via the dormant multi-signal path.
+            if signal.isActive {
+                return
+            }
         }
 
         // Evaluate

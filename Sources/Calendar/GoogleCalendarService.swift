@@ -45,6 +45,15 @@ actor GoogleCalendarService {
         pollTimer = nil
         eventCheckTimer?.invalidate()
         eventCheckTimer = nil
+        // If an event was active, emit a deactivating signal so the detector drops the
+        // lingering calendar signal and clears its prompted-event state on sign-out.
+        if lastActiveEventID != nil {
+            onSignal?(DetectionSignal(
+                source: .googleCalendar,
+                appName: nil, processId: nil, windowTitle: nil,
+                calendarEvent: nil, calendarEventID: nil, isActive: false
+            ))
+        }
         cachedEvents = []
         lastActiveEventID = nil
     }

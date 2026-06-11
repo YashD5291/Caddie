@@ -142,8 +142,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     ) async {
         switch response.actionIdentifier {
         case NotificationManager.recordAction:
-            let title = response.notification.request.content.title
-                .replacingOccurrences(of: "Meeting Detected: ", with: "")
+            // Prefer the title carried in userInfo; fall back to stripping the banner prefix.
+            let content = response.notification.request.content
+            let title = (content.userInfo["title"] as? String)
+                ?? content.title.replacingOccurrences(of: "Meeting Detected: ", with: "")
             await MainActor.run {
                 // startManualRecording(title:) sets currentMeetingTitle itself.
                 appState?.startManualRecording(title: title)

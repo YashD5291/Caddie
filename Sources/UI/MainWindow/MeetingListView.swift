@@ -108,6 +108,10 @@ struct MeetingListView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            } else {
+                Section("Calendar") {
+                    signInPromptCard
+                }
             }
 
             if !ongoingMeetings.isEmpty {
@@ -139,6 +143,64 @@ struct MeetingListView: View {
         .listStyle(.sidebar)
         .searchable(text: $searchText, prompt: "Search meetings")
         .navigationTitle("Caddie")
+    }
+
+    // MARK: - Sign-In Prompt Card
+
+    @ViewBuilder
+    private var signInPromptCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar.badge.plus")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.orange)
+                Text("Connect Google Calendar")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+
+            Text("Sign in with Google to see your schedule and detect meetings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            switch appState.googleAuthState {
+            case .signingIn:
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Complete sign-in in your browser.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Button("Cancel") {
+                    appState.cancelGoogleSignIn()
+                }
+                .font(.caption2)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+
+            case .error(let message):
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Try Again") {
+                    appState.signInToGoogle()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.small)
+
+            default:
+                Button("Sign in with Google") {
+                    appState.signInToGoogle()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 4)
+        .listRowSeparator(.hidden)
     }
 
     // MARK: - Empty State

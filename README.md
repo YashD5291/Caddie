@@ -50,6 +50,8 @@ Meeting detected ──> Record (stereo WAV) ──> Transcribe (Parakeet ASR)
 
 Caddie monitors active audio sessions via CoreAudio, window titles via Accessibility, and your Google Calendar via OAuth2. When a meeting is detected — locally or from your calendar — it prompts you to start recording, then captures two audio streams: system audio (other participants) and your microphone. Today's schedule appears in the sidebar so you always know what's coming up. You can also start/stop recording manually from the menu bar.
 
+Google sign-in is required during onboarding and to unlock calendar features (today's schedule, calendar-based meeting prompts). Local recording, playback, and your recordings library remain fully usable even when signed out — the sidebar simply surfaces a compact sign-in card where the schedule would appear.
+
 After the meeting ends, a local ML pipeline runs Parakeet ASR and Sortformer speaker diarization on CoreML, accelerated by the Apple Neural Engine. The transcript with speaker labels is stored alongside ALAC-compressed audio in a GRDB-backed SQLite database, fully indexed for search.
 
 ## Architecture
