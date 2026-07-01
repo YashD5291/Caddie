@@ -99,10 +99,11 @@ None yet.
 | 260610-1ur | Fix 7 code-review findings: calendar signal loss, switchDevice WAV finalization, notification title, error-state handling, LoadingOverlay task leak, RT-thread allocations, dead dismiss code | 2026-06-09 | cfc4cad | [260610-1ur-fix-7-confirmed-code-review-findings-cal](./quick/260610-1ur-fix-7-confirmed-code-review-findings-cal/) |
 | 260610-nnu | Release prep v1.1.0: externalize Google OAuth secret to gitignored file, guard against runtime sortformer download, bump version, commit branch work in 8 atomic chunks (secret-free, tests green) | 2026-06-10 | b2cebbb | [260610-nnu-release-prep-v1-1-0-externalize-oauth-se](./quick/260610-nnu-release-prep-v1-1-0-externalize-oauth-se/) |
 | 260612-15a | Wire Sparkle auto-updates: updater controller + UI, SUFeedURL/SUPublicEDKey, appcast generation/signing/upload in release.sh | 2026-06-12 | f12b109 | [260612-15a-wire-sparkle-auto-updates-updater-contro](./quick/260612-15a-wire-sparkle-auto-updates-updater-contro/) |
+| 260701-xbi | CAL-03: fire the calendar record prompt a configurable lead time before start (default 2 min), now-injectable model helpers + lead-time service selection + 1/2/5-min Settings picker persisted in UserDefaults, README updated | 2026-07-01 | 84b1b3a | [260701-xbi-cal-03-fire-meeting-record-prompt-config](./quick/260701-xbi-cal-03-fire-meeting-record-prompt-config/) |
 
 ## Session Continuity
 
-Last session: 2026-06-10T11:47:19Z
-Last activity: 2026-06-12 - Completed quick task 260612-15a: Sparkle auto-updates wired
-Stopped at: Completed quick task 260610-nnu
+Last session: 2026-07-01T18:39:00Z
+Last activity: 2026-07-01 - Completed quick task 260701-xbi: CAL-03 pre-meeting prompt lead time
+Stopped at: Completed quick task 260701-xbi
 Resume file: None
