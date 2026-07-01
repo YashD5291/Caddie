@@ -35,7 +35,7 @@ Caddie lives in your menu bar and watches for meetings. When one starts, it reco
 | **Store** | Searchable local database with full-text search across all transcripts |
 | **Calendar** | Google Calendar integration — sign in via OAuth2, auto-detect remote meetings |
 | **Manual** | Start/stop recording anytime from the menu bar |
-| **Notify** | macOS notifications on recording start, transcription complete, and errors |
+| **Notify** | macOS notifications on recording start, transcription complete, and errors — plus a pre-meeting prompt a configurable lead time (default 2 min) before scheduled calendar meetings start |
 
 **Privacy-first.** All processing on-device. Network only for Google Calendar sync (optional) and Sparkle updates.
 
@@ -49,7 +49,7 @@ Meeting detected ──> Record (stereo WAV) ──> Transcribe (Parakeet ASR)
                                           ──> Notify
 ```
 
-Caddie monitors active audio sessions via CoreAudio, window titles via Accessibility, and your Google Calendar via OAuth2. When a meeting is detected — locally or from your calendar — it prompts you to start recording, then captures two audio streams: system audio (other participants) and your microphone. Today's schedule appears in the sidebar so you always know what's coming up. You can also start/stop recording manually from the menu bar.
+Caddie monitors active audio sessions via CoreAudio, window titles via Accessibility, and your Google Calendar via OAuth2. When a meeting is detected — locally or from your calendar — it prompts you to start recording, then captures two audio streams: system audio (other participants) and your microphone. For calendar meetings the prompt arrives a configurable lead time before the meeting starts (1, 2, or 5 minutes — default 2 — set in Settings), so you're ready before it begins. Today's schedule appears in the sidebar so you always know what's coming up. You can also start/stop recording manually from the menu bar.
 
 Google sign-in is required during onboarding and to unlock calendar features (today's schedule, calendar-based meeting prompts). Local recording, playback, and your recordings library remain fully usable even when signed out — the sidebar simply surfaces a compact sign-in card where the schedule would appear.
 
@@ -153,6 +153,7 @@ All requested through standard macOS prompts. Revoke anytime in System Settings 
 ### Recently Shipped (v2.0)
 
 - Google Calendar integration — today's events in sidebar, meeting detection prompts
+- Pre-meeting prompt — asks if you want to record a configurable lead time (1/2/5 min, default 2) before a calendar meeting starts
 - Google OAuth2 sign-in with PKCE (browser-based, tokens in Keychain)
 - No Apple Calendar dependency — events fetched directly from Google Calendar API
 - Audio device picker (select Loopback/Jump Desktop as capture source)
@@ -175,7 +176,6 @@ All requested through standard macOS prompts. Revoke anytime in System Settings 
 ### Up Next
 
 - **Calendar-based detection** — auto-start recording when Google Calendar meetings begin
-- **Pre-meeting notification** — "Recording starts in 2 min" prompt before scheduled meetings
 - **Calendar metadata** — show event title and attendees in meeting list
 - **AI summaries** — action items, key decisions, and highlights extracted from transcripts
 
