@@ -1,6 +1,16 @@
 import Foundation
 import os
 
+/// Shared persistence contract for the pre-meeting prompt lead time, so the
+/// Settings picker (writer) and GoogleCalendarService (reader) can never drift.
+enum MeetingPromptSettings {
+    /// UserDefaults key for how many seconds before a meeting starts the
+    /// "record this meeting?" prompt fires.
+    static let leadTimeKey = "meetingPromptLeadTimeSeconds"
+    /// Default lead time when the key has never been set (2 minutes).
+    static let defaultLeadTime: Double = 120
+}
+
 actor GoogleCalendarService {
     private let logger = Logger(subsystem: "com.caddie.app", category: "Calendar")
     private let authManager: GoogleAuthManager
@@ -155,7 +165,7 @@ actor GoogleCalendarService {
         let meetingEvents = Self.filterMeetingEvents(cachedEvents)
         // Lead time is read directly from UserDefaults (actor + UserDefaults is thread-safe).
         // object(forKey:) so an explicit 0 wouldn't be masked; absent key -> 2 min default.
-        let lead = UserDefaults.standard.object(forKey: "meetingPromptLeadTimeSeconds") as? Double ?? 120
+        let lead = UserDefaults.standard.object(forKey: MeetingPromptSettings.leadTimeKey) as? Double ?? MeetingPromptSettings.defaultLeadTime
         // Prompt a configurable lead time BEFORE start (not at start). Skip dismissed events:
         // treat them as if no event is active so they never re-prompt.
         let activeEvent = meetingEvents.first { $0.shouldPrompt(leadTime: lead, now: now) && !dismissedEventIDs.contains($0.id) }

@@ -8,7 +8,7 @@ struct SettingsView: View {
     @Environment(\.sparkleUpdaterController) private var updaterController
     @State private var launchAtLogin = false
     @State private var gracePeriod: Double = 10
-    @State private var promptLeadTime: Double = 120
+    @State private var promptLeadTime: Double = MeetingPromptSettings.defaultLeadTime
     @State private var micStatus: PermissionStatus = .undetermined
     @State private var screenStatus: PermissionStatus = .undetermined
     @State private var accessibilityStatus: PermissionStatus = .undetermined
@@ -29,12 +29,12 @@ struct SettingsView: View {
         .frame(width: 450)
         .onAppear {
             launchAtLogin = SMAppService.mainApp.status == .enabled
-            promptLeadTime = UserDefaults.standard.object(forKey: "meetingPromptLeadTimeSeconds") as? Double ?? 120
+            promptLeadTime = UserDefaults.standard.object(forKey: MeetingPromptSettings.leadTimeKey) as? Double ?? MeetingPromptSettings.defaultLeadTime
             refreshPermissions()
             refreshStorage()
         }
         .onChange(of: promptLeadTime) { _, newValue in
-            UserDefaults.standard.set(newValue, forKey: "meetingPromptLeadTimeSeconds")
+            UserDefaults.standard.set(newValue, forKey: MeetingPromptSettings.leadTimeKey)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
