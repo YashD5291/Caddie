@@ -151,10 +151,14 @@ actor GoogleCalendarService {
 
     // MARK: - Event Window Check
 
-    func checkActiveEvents() {
+    func checkActiveEvents(now: Date = Date()) {
         let meetingEvents = Self.filterMeetingEvents(cachedEvents)
-        // Skip dismissed events: treat them as if no event is active so they never re-prompt.
-        let activeEvent = meetingEvents.first { $0.isNow && !dismissedEventIDs.contains($0.id) }
+        // Lead time is read directly from UserDefaults (actor + UserDefaults is thread-safe).
+        // object(forKey:) so an explicit 0 wouldn't be masked; absent key -> 2 min default.
+        let lead = UserDefaults.standard.object(forKey: "meetingPromptLeadTimeSeconds") as? Double ?? 120
+        // Prompt a configurable lead time BEFORE start (not at start). Skip dismissed events:
+        // treat them as if no event is active so they never re-prompt.
+        let activeEvent = meetingEvents.first { $0.shouldPrompt(leadTime: lead, now: now) && !dismissedEventIDs.contains($0.id) }
         if let event = activeEvent {
             // Finding 1: only consume the event (record lastActiveEventID) when we can
             // actually deliver the signal. If onSignal is nil (e.g. during the model-load

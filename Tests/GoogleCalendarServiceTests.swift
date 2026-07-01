@@ -254,6 +254,100 @@ final class GoogleCalendarServiceTests: XCTestCase {
         XCTAssertTrue(isDismissed)
     }
 
+    // MARK: - checkActiveEvents lead-time selection (CAL-03)
+
+    private static let leadTimeKey = "meetingPromptLeadTimeSeconds"
+    private let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
+
+    override func setUp() {
+        super.setUp()
+        UserDefaults.standard.removeObject(forKey: Self.leadTimeKey)
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: Self.leadTimeKey)
+        super.tearDown()
+    }
+
+    func testEventWithinDefaultLeadFiresOnce() async {
+        let service = makeService()
+        let event = makeTimedEvent(
+            id: "soon-90",
+            summary: "Standup",
+            start: fixedNow.addingTimeInterval(90),
+            end: fixedNow.addingTimeInterval(1800),
+            attendees: ["a@x.com", "b@x.com"]
+        )
+        await service.injectCachedEvents([event])
+
+        let box = SignalBox()
+        await service.setOnSignal { signal in box.append(signal) }
+        await service.checkActiveEvents(now: fixedNow)
+
+        let signals = box.signals
+        XCTAssertEqual(signals.count, 1, "Event 90s away with default 120s lead should fire once")
+        XCTAssertEqual(signals.first?.calendarEventID, "soon-90")
+        XCTAssertEqual(signals.first?.isActive, true)
+    }
+
+    func testEventOutsideDefaultLeadDoesNotFire() async {
+        let service = makeService()
+        let event = makeTimedEvent(
+            id: "later-200",
+            summary: "Later",
+            start: fixedNow.addingTimeInterval(200),
+            end: fixedNow.addingTimeInterval(1800),
+            attendees: ["a@x.com", "b@x.com"]
+        )
+        await service.injectCachedEvents([event])
+
+        let box = SignalBox()
+        await service.setOnSignal { signal in box.append(signal) }
+        await service.checkActiveEvents(now: fixedNow)
+
+        XCTAssertTrue(box.signals.isEmpty, "Event 200s away with default 120s lead must not fire yet")
+    }
+
+    func testRaisingPersistedLeadTimeFiresPreviouslyOutOfWindowEvent() async {
+        UserDefaults.standard.set(300.0, forKey: Self.leadTimeKey)
+        let service = makeService()
+        let event = makeTimedEvent(
+            id: "later-200",
+            summary: "Later",
+            start: fixedNow.addingTimeInterval(200),
+            end: fixedNow.addingTimeInterval(1800),
+            attendees: ["a@x.com", "b@x.com"]
+        )
+        await service.injectCachedEvents([event])
+
+        let box = SignalBox()
+        await service.setOnSignal { signal in box.append(signal) }
+        await service.checkActiveEvents(now: fixedNow)
+
+        let signals = box.signals
+        XCTAssertEqual(signals.count, 1, "With 300s lead persisted, the 200s event should fire")
+        XCTAssertEqual(signals.first?.calendarEventID, "later-200")
+    }
+
+    func testInWindowEventFiresExactlyOnceAcrossRepeatedChecks() async {
+        let service = makeService()
+        let event = makeTimedEvent(
+            id: "soon-90",
+            summary: "Standup",
+            start: fixedNow.addingTimeInterval(90),
+            end: fixedNow.addingTimeInterval(1800),
+            attendees: ["a@x.com", "b@x.com"]
+        )
+        await service.injectCachedEvents([event])
+
+        let box = SignalBox()
+        await service.setOnSignal { signal in box.append(signal) }
+        await service.checkActiveEvents(now: fixedNow)
+        await service.checkActiveEvents(now: fixedNow)
+
+        XCTAssertEqual(box.signals.count, 1, "Dedup: same in-window event must fire only once")
+    }
+
     // MARK: - Helpers
 
     private func makeService() -> GoogleCalendarService {
