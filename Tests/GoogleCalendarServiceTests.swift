@@ -256,6 +256,11 @@ final class GoogleCalendarServiceTests: XCTestCase {
 
     // MARK: - checkActiveEvents lead-time selection (CAL-03)
 
+    // Deliberately a raw literal, NOT MeetingPromptSettings.leadTimeKey: this pins the
+    // persisted key name as a wire-format contract. If production ever renames the key,
+    // these tests write the old name while the service reads the new one and falls back
+    // to the default — the resulting failures flag the silent drift. Do not replace with
+    // the shared constant.
     private static let leadTimeKey = "meetingPromptLeadTimeSeconds"
     private let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
 
@@ -348,6 +353,22 @@ final class GoogleCalendarServiceTests: XCTestCase {
         XCTAssertEqual(box.signals.count, 1, "Dedup: same in-window event must fire only once")
     }
 
+    /// An all-day event (date, no dateTime → nil startDate) must never prompt, even with
+    /// meeting-like attendees. Guarded twice: filterMeetingEvents excludes all-day events,
+    /// and shouldPrompt's startsWithin returns false on a nil startDate. This exercises the
+    /// full service path, not just the model helper.
+    func testAllDayEventNeverFiresSignal() async {
+        let service = makeService()
+        let allDay = makeAllDayEventWithAttendees(id: "all-day-1", summary: "Company Offsite")
+        await service.injectCachedEvents([allDay])
+
+        let box = SignalBox()
+        await service.setOnSignal { signal in box.append(signal) }
+        await service.checkActiveEvents(now: fixedNow)
+
+        XCTAssertTrue(box.signals.isEmpty, "All-day event must never fire a record prompt")
+    }
+
     // MARK: - Helpers
 
     private func makeService() -> GoogleCalendarService {
@@ -389,6 +410,21 @@ final class GoogleCalendarServiceTests: XCTestCase {
             "summary": "\(summary)",
             "start": { "date": "2026-04-03" },
             "end":   { "date": "2026-04-04" }
+        }
+        """.data(using: .utf8)!
+        return try! JSONDecoder().decode(GoogleCalendarEvent.self, from: json)
+    }
+
+    /// All-day event that also carries meeting-like attendees, so a "no signal" result
+    /// proves the all-day / nil-startDate guard stopped it — not merely a lack of attendees.
+    private func makeAllDayEventWithAttendees(id: String, summary: String) -> GoogleCalendarEvent {
+        let json = """
+        {
+            "id": "\(id)",
+            "summary": "\(summary)",
+            "start": { "date": "2026-04-03" },
+            "end":   { "date": "2026-04-04" },
+            "attendees": [{ "email": "a@x.com" }, { "email": "b@x.com" }]
         }
         """.data(using: .utf8)!
         return try! JSONDecoder().decode(GoogleCalendarEvent.self, from: json)

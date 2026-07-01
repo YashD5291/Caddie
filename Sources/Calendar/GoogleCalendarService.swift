@@ -168,6 +168,9 @@ actor GoogleCalendarService {
         let lead = UserDefaults.standard.object(forKey: MeetingPromptSettings.leadTimeKey) as? Double ?? MeetingPromptSettings.defaultLeadTime
         // Prompt a configurable lead time BEFORE start (not at start). Skip dismissed events:
         // treat them as if no event is active so they never re-prompt.
+        // Single-slot by design: `first` + one `lastActiveEventID` means only one meeting
+        // prompts at a time. If a second meeting enters its lead window while the first is
+        // still ongoing, it prompts once the first clears — matching the prior isNow behavior.
         let activeEvent = meetingEvents.first { $0.shouldPrompt(leadTime: lead, now: now) && !dismissedEventIDs.contains($0.id) }
         if let event = activeEvent {
             // Finding 1: only consume the event (record lastActiveEventID) when we can
