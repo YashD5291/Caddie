@@ -31,15 +31,18 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 - ✓ Recording resilience (device disconnect, stale cleanup) — v1.0 Phase 9
 - ✓ ML models bundled in app (no runtime download) — v1.0 Phase 10
 - ✓ Onboarding flow with bundle-based model loading — v1.0 Phase 10
+- ✓ Audio input device picker with persistence + mid-recording hot-swap — v2.0 (Phases 11–13)
+- ✓ Manual start/stop recording from menu bar — v2.0 (Phase 13)
+- ✓ Google Calendar integration (OAuth PKCE, Keychain, polling, Today's Schedule) — v2.0 (v1.1.0)
+- ✓ Calendar-triggered recording via actionable notification prompt — v2.0 (PR #3)
+- ✓ Pre-meeting notification at configurable lead time before start — v2.0 (PR #8)
+- ✓ Calendar event title carried into meeting records — v2.0
+- ✓ Live transcription during recording (streaming ASR, display-only) — v2.0 (v1.2.0)
+- ✓ Sparkle auto-updates (signed appcast in release pipeline) — v2.0 (v1.2.1)
 
 ### Active
 
-- [ ] Google Calendar integration (OAuth2, read meetings, auto-trigger recording)
-- [ ] Audio device picker (select Loopback/Jump Desktop device as capture source)
-- [ ] Calendar-based meeting detection (replaces local app detection as primary)
-- [ ] Pre-meeting notification before recording starts
-- [ ] Manual start/stop recording from menu bar
-- [ ] Calendar event metadata in meeting list (title, attendees)
+(None — v2.0 shipped. Next milestone not yet defined; run `/gsd:new-milestone`.)
 
 ### Future
 
@@ -54,32 +57,30 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 
 - Cloud sync — core value is local-only, privacy-first
 - Multi-platform — macOS only
-- Real-time transcription — architecturally different pipeline
 - Multi-language transcription UI — feature scope
 - Browser extension for calendar — native OAuth preferred
 
-## Current Milestone: v2.0 Google Calendar + Remote Meeting Recording
+**Note:** "Real-time transcription" was previously out of scope but shipped in v2.0 as *display-only live transcription* during recording — the persisted transcript still comes from the post-recording diarized pipeline, so the architectural boundary held.
 
-**Goal:** Caddie detects meetings from Google Calendar and records from a user-selected audio device (Loopback virtual device for Jump Desktop) — fully automatic.
+## Current State
 
-**Target features:**
-- Google OAuth2 sign-in for calendar access
-- Read upcoming meetings from Google Calendar
-- Auto-start recording when a calendar meeting begins
-- Audio device picker in settings (select Loopback device for Jump Desktop audio)
-- Pre-meeting notification ("Recording starts in 2 min")
-- Manual start/stop recording from menu bar
-- Meeting list shows calendar event metadata (title, attendees)
+**Shipped:** v2.0 (Google Calendar + Remote Meeting Recording), released as v1.1.0 → **v1.2.1** (current). Notarized DMGs on a public GitHub repo; Sparkle auto-updates live from v1.2.1.
 
-**User context:** User joins meetings on remote PC via Jump Desktop, with Loopback virtual device routing Jump Desktop audio to Mac. Caddie runs on the local Mac.
+**Product shift this milestone:** local app-based auto-detection (Zoom/Teams/Meet window + audio-process signals) was **removed** as the recording trigger. Recording is now user-initiated — manual (menu bar / New Recording), a calendar event's Record button, or the actionable pre-meeting notification. Google Calendar replaced EventKit. The auto-start-on-meeting-start idea was deliberately dropped in favor of the notification prompt (no recording of pre-meeting silence, user stays in control).
+
+**User context:** User joins meetings on a remote PC via Jump Desktop, with a Loopback virtual device routing that audio to the Mac; Caddie runs on the local Mac and captures from the selected input device.
+
+**Next milestone:** not yet defined. Candidate directions in Future below; run `/gsd:new-milestone` to scope.
 
 ## Context
 
-- v1.0 shipped: 10 phases, 22 plans, 8,292 LOC Swift across Sources + Tests
-- 49+ tests passing (unit + integration), Swift 6.0 strict concurrency
-- Stack: Swift 6.0, SwiftUI, macOS 14.2+, GRDB 7.10, FluidAudio 0.12.4, XcodeGen
-- App bundle includes ~711MB of ML models (ASR + Sortformer)
-- CI/CD: GitHub Actions with model caching, Sparkle for updates
+- v2.0 shipped across v1.1.0–v1.2.1; 267 tests passing, Swift 6 strict concurrency
+- Stack: Swift 6, SwiftUI, macOS 14.2+, GRDB 7.10, FluidAudio 0.12.4 (Parakeet ASR + Sortformer diarization + streaming ASR), Sparkle 2.9, XcodeGen
+- Self-contained app bundle (~690MB ML models bundled; zero runtime downloads)
+- Google OAuth secret externalized to a gitignored file; EdDSA update key in login Keychain
+- Release pipeline: scripts/build-dmg.sh → scripts/release.sh (notarize/staple/sign appcast); notary profile "Caddie"
+- Known tech debt (from v2.0 audit): attendee names decoded but not rendered/persisted; onboarding copy doesn't enumerate exact calendar data accessed; GitHub Actions release workflow disabled (local script is source of truth)
+- Open manual check: live-transcription end-to-end with a real microphone was never run
 
 ## Constraints
 
@@ -119,4 +120,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-24 after v2.0 milestone start*
+*Last updated: 2026-07-02 after v2.0 milestone completion*
