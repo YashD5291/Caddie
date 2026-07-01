@@ -185,6 +185,67 @@ final class GoogleCalendarEventTests: XCTestCase {
         XCTAssertFalse(event.isUpcoming)
     }
 
+    // MARK: - shouldPrompt / hasEnded / startsWithin (lead-time helpers)
+
+    // Fixed whole-second `now` so ISO8601 serialization (no fractional seconds) is deterministic.
+    private let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
+
+    func testShouldPromptFalseBeforeWindow() throws {
+        let event = makeEvent(
+            start: fixedNow.addingTimeInterval(300),
+            end:   fixedNow.addingTimeInterval(3600)
+        )
+        XCTAssertFalse(event.startsWithin(120, now: fixedNow))
+        XCTAssertFalse(event.shouldPrompt(leadTime: 120, now: fixedNow))
+    }
+
+    func testShouldPromptTrueInsideWindow() throws {
+        let event = makeEvent(
+            start: fixedNow.addingTimeInterval(90),
+            end:   fixedNow.addingTimeInterval(3600)
+        )
+        XCTAssertTrue(event.shouldPrompt(leadTime: 120, now: fixedNow))
+    }
+
+    func testShouldPromptTrueAtBoundaryInclusive() throws {
+        let event = makeEvent(
+            start: fixedNow.addingTimeInterval(120),
+            end:   fixedNow.addingTimeInterval(3600)
+        )
+        XCTAssertTrue(event.shouldPrompt(leadTime: 120, now: fixedNow),
+                      "<= is inclusive: start exactly `lead` away should prompt")
+    }
+
+    func testShouldPromptTrueWhenAlreadyStartedNotEnded() throws {
+        let event = makeEvent(
+            start: fixedNow.addingTimeInterval(-60),
+            end:   fixedNow.addingTimeInterval(600)
+        )
+        // Superset of old isNow: already started, not ended -> still prompts.
+        XCTAssertTrue(event.shouldPrompt(leadTime: 120, now: fixedNow))
+    }
+
+    func testHasEndedTrueWhenEndInPast() throws {
+        let event = makeEvent(
+            start: fixedNow.addingTimeInterval(-600),
+            end:   fixedNow.addingTimeInterval(-60)
+        )
+        XCTAssertTrue(event.hasEnded(now: fixedNow))
+        XCTAssertFalse(event.shouldPrompt(leadTime: 120, now: fixedNow))
+    }
+
+    func testShouldPromptFalseWhenStartsWithinButEnded() throws {
+        // Zero-duration-ish event: start in window but already ended dominates.
+        let event = makeEvent(
+            start: fixedNow.addingTimeInterval(-30),
+            end:   fixedNow.addingTimeInterval(-10)
+        )
+        XCTAssertTrue(event.startsWithin(120, now: fixedNow))
+        XCTAssertTrue(event.hasEnded(now: fixedNow))
+        XCTAssertFalse(event.shouldPrompt(leadTime: 120, now: fixedNow),
+                       "ended dominates startsWithin")
+    }
+
     // MARK: - Missing summary (the root cause bug)
 
     func testDecodesEventWithoutSummary() throws {
