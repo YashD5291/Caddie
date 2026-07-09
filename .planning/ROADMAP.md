@@ -39,7 +39,11 @@
   3. Force-killing the process mid-recording (kill -9) leaves a playable file missing at most the last ~10 seconds (fragmented `.mov`)
   4. Each recording persists a host-clock anchor tying the first video frame to the audio start time
   5. First-frame and static-screen edge cases produce correct-duration output (no dropped first frame, no truncated tail)
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 18-01-PLAN.md — Concurrency spike + engine types & all pure config/dimension/anchor/filter logic (TDD)
+- [ ] 18-02-PLAN.md — Live SCStream -> AVAssetWriter engine (first-frame, static-screen keepalive, stop, didStopWithError)
+- [ ] 18-03-PLAN.md — kill-9 recovery gate + DEBUG record/validate harness (VID-07)
+- [ ] 18-04-PLAN.md — Manual verification checkpoint (real capture, VID-05 exclusion, static duration, anchor)
 **Research flag**: Swift 6 strict-concurrency shape for SCK background-queue delegates + dedicated writer queue warrants a short spike before committing the design; verify fragment recovery empirically with a kill-9 gate on the 14.2 floor.
 
 ### Phase 19: Recording Lifecycle Integration
@@ -87,7 +91,7 @@ Phases execute in numeric order: 18 → 19 → 20 → 21
 |-------|-----------|----------------|--------|-----------|
 | 1–10. Production Hardening | v1.0 | — | ✅ Complete | 2026-03-24 |
 | 11–17. Calendar + Remote Recording | v2.0 | — | ✅ Complete | 2026-07-01 |
-| 18. Screen Capture Engine | v3.0 | 0/TBD | Not started | - |
+| 18. Screen Capture Engine | v3.0 | 0/4 | Planned | - |
 | 19. Recording Lifecycle Integration | v3.0 | 0/TBD | Not started | - |
 | 20. Video Storage & Retention | v3.0 | 0/TBD | Not started | - |
 | 21. Settings, Playback & Alignment | v3.0 | 0/TBD | Not started | - |

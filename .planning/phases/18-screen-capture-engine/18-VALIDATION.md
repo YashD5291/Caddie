@@ -38,10 +38,14 @@ created: 2026-07-09
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| (filled by planner) | | | VID-05 | unit | filter-selection/exclusion logic tests | ❌ W0 | ⬜ pending |
-| (filled by planner) | | | VID-06 | unit | preset math (fps/bitrate/dimension) tests | ❌ W0 | ⬜ pending |
-| (filled by planner) | | | VID-07 | scripted gate | `Scripts/kill9-recovery-gate.sh` | ❌ W0 | ⬜ pending |
-| (filled by planner) | | | STOR-04 | unit | host-clock anchor computation tests | ❌ W0 | ⬜ pending |
+| 18-01-T3 | 18-01 | 1 | VID-05 | unit | `-only-testing:CaddieTests/ScreenRecorderFilterTests` (filter-selection/Caddie-exclusion) | ❌ W0 | ⬜ pending |
+| 18-01-T2 | 18-01 | 1 | VID-06 | unit | `-only-testing:CaddieTests/ScreenRecorderConfigTests` (preset fps/bitrate/dimension) | ❌ W0 | ⬜ pending |
+| 18-01-T2 | 18-01 | 1 | STOR-04 | unit | `-only-testing:CaddieTests/ScreenRecorderConfigTests` (hostTicksToSeconds) | ❌ W0 | ⬜ pending |
+| 18-01-T3 | 18-01 | 1 | — | unit | `-only-testing:CaddieTests/ScreenRecorderStateTests` (state machine/idempotent stop/frameAction) | ❌ W0 | ⬜ pending |
+| 18-02-T1 | 18-02 | 2 | VID-05/06/STOR-04 | build+impl | SCStream+writer setup, first-frame anchor, filter (build green) | ❌ W0 | ⬜ pending |
+| 18-02-T2 | 18-02 | 2 | VID-07 | build+impl | .mov + movieFragmentInterval, keepalive, async finalize (build green) | ❌ W0 | ⬜ pending |
+| 18-03-T2 | 18-03 | 3 | VID-07 | scripted gate | `bash Scripts/kill9-recovery-gate.sh` | ❌ W0 | ⬜ pending |
+| 18-04-T1 | 18-04 | 4 | VID-05/06/07/STOR-04 | manual gate | human-verify: real capture, exclusion, static duration, anchor | n/a | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
