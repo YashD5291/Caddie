@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
-status: roadmap created
-stopped_at: Roadmap created — Phases 18–21 defined, awaiting phase planning
-last_updated: "2026-07-09"
+status: executing
+stopped_at: Completed 18-01-PLAN.md
+last_updated: "2026-07-09T12:24:34.290Z"
 last_activity: 2026-07-09
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 4
+  completed_plans: 1
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-09)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Milestone v3.0 Screen Recording — roadmap created (Phases 18–21)
+**Current focus:** Phase 18 — screen-capture-engine
 
 ## Current Position
 
-Phase: 18 — Screen Capture Engine (not started)
-Plan: —
-Status: Roadmap created — awaiting phase planning (`/gsd:plan-phase 18`)
-Last activity: 2026-07-09 — ROADMAP.md written, 15/15 requirements mapped across 4 phases
+Phase: 18 (screen-capture-engine) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-07-09
 
 ## Performance Metrics
 
@@ -61,6 +61,8 @@ Recent decisions affecting current work:
 - [v3.0 Scoping]: Capture target (full display vs meeting window) is user-selectable in Settings
 - [v3.0 Scoping]: In-app video playback in MeetingDetailView (AVKit)
 - [v2.0]: Recording is user-initiated (manual / calendar prompt); auto-detection removed as trigger
+- [Phase 18]: 18-01: Pattern 1 concurrency (queue-confined final class + @unchecked Sendable WriterSink) proven green under strict concurrency; no @preconcurrency/nonisolated needed
+- [Phase 18]: 18-01: First-frame recipe B (startSession at first PTS) + ~2s static-screen keepalive chosen for Plan 18-02
 
 ### Pending Todos
 
@@ -82,11 +84,12 @@ Recent decisions affecting current work:
 | 260610-nnu | Release prep v1.1.0: externalize Google OAuth secret to gitignored file, guard against runtime sortformer download, bump version, commit branch work in 8 atomic chunks (secret-free, tests green) | 2026-06-10 | b2cebbb | [260610-nnu-release-prep-v1-1-0-externalize-oauth-se](./quick/260610-nnu-release-prep-v1-1-0-externalize-oauth-se/) |
 | 260612-15a | Wire Sparkle auto-updates: updater controller + UI, SUFeedURL/SUPublicEDKey, appcast generation/signing/upload in release.sh | 2026-06-12 | f12b109 | [260612-15a-wire-sparkle-auto-updates-updater-contro](./quick/260612-15a-wire-sparkle-auto-updates-updater-contro/) |
 | 260701-xbi | CAL-03: fire the calendar record prompt a configurable lead time before start (default 2 min), now-injectable model helpers + lead-time service selection + 1/2/5-min Settings picker persisted in UserDefaults, README updated | 2026-07-01 | 84b1b3a | [260701-xbi-cal-03-fire-meeting-record-prompt-config](./quick/260701-xbi-cal-03-fire-meeting-record-prompt-config/) |
+| Phase 18 P01 | 11 | 3 tasks | 4 files |
 
 ## Session Continuity
 
-Last session: 2026-07-09
+Last session: 2026-07-09T12:24:08.198Z
 Last activity: 2026-07-09
-Stopped at: Roadmap created — Phases 18–21 defined, 15/15 requirements mapped
+Stopped at: Completed 18-01-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 18`

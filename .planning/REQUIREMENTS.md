@@ -13,8 +13,8 @@ Requirements for optional screen video capture during meeting recordings. Each m
 - [ ] **VID-02**: User can choose the capture target in Settings: full display or meeting window
 - [ ] **VID-03**: When enabled, video capture starts and stops automatically with the meeting recording lifecycle (manual and calendar-prompted recordings alike)
 - [ ] **VID-04**: Video capture failure never aborts the audio recording — recording degrades to audio-only with the error logged and surfaced
-- [ ] **VID-05**: Caddie's own windows are excluded from the capture (SCContentFilter exclusion)
-- [ ] **VID-06**: User can choose a video quality preset in Settings (compact ~10 fps / balanced ~15 fps / high ~30 fps; HEVC with explicit bitrate caps)
+- [x] **VID-05**: Caddie's own windows are excluded from the capture (SCContentFilter exclusion)
+- [x] **VID-06**: User can choose a video quality preset in Settings (compact ~10 fps / balanced ~15 fps / high ~30 fps; HEVC with explicit bitrate caps)
 - [ ] **VID-07**: A crash or power loss during recording loses at most the last ~10 seconds of video; the partial file remains playable (fragmented .mov)
 
 ### Storage
@@ -22,7 +22,7 @@ Requirements for optional screen video capture during meeting recordings. Each m
 - [ ] **STOR-01**: Video is stored locally alongside the meeting's audio and linked to the meeting record (nullable `video_file` column; never in FTS5)
 - [ ] **STOR-02**: Deleting a meeting deletes its video file along with its audio
 - [ ] **STOR-03**: Recording is blocked pre-start when disk space is insufficient for video (disk guard raised above the current 500 MB when video is enabled)
-- [ ] **STOR-04**: Video/audio timeline alignment metadata (host-clock anchor) is persisted with the meeting so playback position maps to transcript time
+- [x] **STOR-04**: Video/audio timeline alignment metadata (host-clock anchor) is persisted with the meeting so playback position maps to transcript time
 
 ### Playback
 
@@ -72,10 +72,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VID-05 | Phase 18 | Pending |
-| VID-06 | Phase 18 | Pending |
+| VID-05 | Phase 18 | Complete |
+| VID-06 | Phase 18 | Complete |
 | VID-07 | Phase 18 | Pending |
-| STOR-04 | Phase 18 | Pending |
+| STOR-04 | Phase 18 | Complete |
 | VID-03 | Phase 19 | Pending |
 | VID-04 | Phase 19 | Pending |
 | STOR-01 | Phase 20 | Pending |
