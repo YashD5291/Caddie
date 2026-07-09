@@ -106,15 +106,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         CaddieLogger.app.info("Caddie launched")
         UNUserNotificationCenter.current().delegate = self
         NotificationManager.requestAuthorization()
-
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(windowDidBecomeKey(_:)),
-            name: NSWindow.didBecomeKeyNotification, object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(windowWillClose(_:)),
-            name: NSWindow.willCloseNotification, object: nil
-        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -175,25 +166,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
-    }
-
-    // MARK: - Window Lifecycle
-
-    @objc private func windowDidBecomeKey(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              Self.isMainAppWindow(window) else { return }
-        NSApp.setActivationPolicy(.regular)
-    }
-
-    @objc private func windowWillClose(_ notification: Notification) {
-        Task { @MainActor in
-            let hasVisibleMainWindow = NSApp.windows.contains {
-                $0.isVisible && Self.isMainAppWindow($0)
-            }
-            if !hasVisibleMainWindow {
-                NSApp.setActivationPolicy(.accessory)
-            }
-        }
     }
 
     // MARK: - Notification Handling

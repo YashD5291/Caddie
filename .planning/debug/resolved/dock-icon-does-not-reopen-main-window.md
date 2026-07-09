@@ -98,3 +98,21 @@ windowWillClose still switches NSApp to .accessory when no main window is visibl
 NEW EVIDENCE (2026-07-10): Empirically confirmed the .accessory switch fires DETERMINISTICALLY on close in the built app — lsappinfo type transitions Foreground → UIElement after closing the window, so the dock icon is removed in that path. The `reopen` Apple event still reopens the window (5/5), but a real user with no dock icon has nothing to click. Also, `open -a Caddie` while .accessory spawned a second app instance (LaunchServices artifact). RECOMMENDATION for the user to decide: for standard "always click the dock icon to reopen" behavior, remove the windowWillClose .accessory switch and keep the app .regular always. Not changed in this session because it is a deliberate UX decision and outside this fix's scope.
 </parameter>
 </invoke>
+
+## Follow-up Resolved (2026-07-10): Dock icon now always present
+
+**User decision:** Always keep the Dock icon while Caddie runs (standard macOS app behavior). The "dynamic dock" menu-bar-only mode (ef17e7d) is removed.
+
+**Change (Sources/App/CaddieApp.swift):**
+- Removed the `windowWillClose` observer + handler that switched `NSApp` to `.accessory` when no main window was visible (this is what deleted the Dock icon after close).
+- Removed the `windowDidBecomeKey` observer + handler that existed solely to switch back to `.regular` (dead with the accessory path gone).
+- Removed both `NotificationCenter` observer registrations in `applicationDidFinishLaunching` (they existed solely for that pair).
+- `Info.plist` has `LSUIElement=false`, so the app is `.regular` from launch natively; with the accessory switch gone the policy is unconditionally `.regular` for the app lifetime. The idempotent `.regular` calls in the verified reopen handler and MenuBarView's Open button are retained unchanged.
+- Reopen handler and label-`.onAppear` capture untouched (verified in the previous session).
+
+**Empirical verification (real launched Debug app, fresh single instance):**
+- `make build` → `** BUILD SUCCEEDED **`; `make test` → `** TEST SUCCEEDED **` (280 tests, 0 failures; DockReopenTests unchanged — they assert the decision seam, not policy).
+- (a) Fresh launch → window auto-opens (`count windows` = 1).
+- (b) Close window → `count windows` = 0 AND `lsappinfo` ApplicationType stays **"Foreground"** (previously transitioned to "UIElement" — Dock icon now persists).
+- (c) 3/3 consecutive `reopen` Apple-event cycles (Dock-click equivalent) reopened the window from the closed state.
+- (d) `open -a Caddie` while running: instance count stays 1 (the second-instance LaunchServices artifact was specific to the removed `.accessory` state).
