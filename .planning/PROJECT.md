@@ -42,7 +42,7 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 
 ### Active
 
-(None — v2.0 shipped. Next milestone not yet defined; run `/gsd:new-milestone`.)
+- Screen recording (optional video capture during meetings) — v3.0, see REQUIREMENTS.md
 
 ### Future
 
@@ -62,6 +62,19 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 
 **Note:** "Real-time transcription" was previously out of scope but shipped in v2.0 as *display-only live transcription* during recording — the persisted transcript still comes from the post-recording diarized pipeline, so the architectural boundary held.
 
+## Current Milestone: v3.0 Screen Recording
+
+**Goal:** Optionally capture screen video alongside audio during meeting recordings — native ScreenCaptureKit, on-device, crash-safe, time-aligned with the transcript.
+
+**Target features:**
+- New `ScreenRecorder` (SCStream → AVAssetWriter, hardware HEVC ~10–15 fps, explicit 2–3 Mbps bitrate cap) in `Sources/Recording/`, injected into `RecordingCoordinator` like `LiveTranscriber` — video failure degrades gracefully to audio-only
+- "Record screen" Settings toggle plus capture-target choice (full display vs meeting window); reuses the existing Screen Recording permission
+- Crash-safe fragmented `.mov` (`movieFragmentInterval`) — a crash loses at most the last fragment, never the file
+- `video_file` column + host-clock timestamp anchoring so video aligns with transcript segment times
+- In-app video playback in MeetingDetailView (AVKit) alongside the existing audio player
+
+**Key context:** Zero new dependencies — 22-agent research sweep (2026-07-09) found no viable OSS library; wulkano/Aperture (MIT) and nonstrict-hq/ScreenCaptureKit-Recording-example (MIT) serve as reference implementations only. `SCRecordingOutput` is macOS 15+, so the SCStream → AVAssetWriter path is mandatory at the 14.2 floor. Raise the 500 MB disk guard when video is enabled. System audio uses CoreAudio process taps (not SCK), so video is an independent video-only SCStream.
+
 ## Current State
 
 **Shipped:** v2.0 (Google Calendar + Remote Meeting Recording), released as v1.1.0 → **v1.2.1** (current). Notarized DMGs on a public GitHub repo; Sparkle auto-updates live from v1.2.1.
@@ -70,7 +83,7 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 
 **User context:** User joins meetings on a remote PC via Jump Desktop, with a Loopback virtual device routing that audio to the Mac; Caddie runs on the local Mac and captures from the selected input device.
 
-**Next milestone:** not yet defined. Candidate directions in Future below; run `/gsd:new-milestone` to scope.
+**Next milestone:** v3.0 Screen Recording (started 2026-07-09) — see Current Milestone above. Phase 18 (Screen Capture Engine) complete 2026-07-10: `ScreenRecorder` verified 10/10 must-haves incl. hardware checks (HEVC ~1.2 Mbps, window exclusion, kill-9 recovery, static-screen keepalive, host-clock anchor). Outstanding: kill-9 gate re-run on a macOS 14.2 machine before v3.0 ships.
 
 ## Context
 
@@ -120,4 +133,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-02 after v2.0 milestone completion*
+*Last updated: 2026-07-09 — v3.0 Screen Recording milestone started*

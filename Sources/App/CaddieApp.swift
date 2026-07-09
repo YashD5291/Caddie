@@ -25,6 +25,22 @@ struct CaddieApp: App {
     @Environment(\.openWindow) private var openWindow
 
     init() {
+        #if DEBUG
+        // Headless launch-argument fast-path (DEBUG only): drive ScreenRecorder in a
+        // separate OS process for the VID-07 kill-9 gate BEFORE SwiftUI/AppState/windows
+        // come up. Both entry points never return (dispatchMain), so the production
+        // launch path below is only reached in normal app runs.
+        let harnessArgs = CommandLine.arguments
+        if let idx = harnessArgs.firstIndex(of: "--screen-record-harness"),
+           idx + 1 < harnessArgs.count {
+            ScreenRecorderHarness.runRecordMode(outputPath: harnessArgs[idx + 1])  // never returns
+        }
+        if let idx = harnessArgs.firstIndex(of: "--validate-mov"),
+           idx + 1 < harnessArgs.count {
+            ScreenRecorderHarness.runValidateMode(path: harnessArgs[idx + 1])  // never returns
+        }
+        #endif
+
         appDelegate.appState = appState
         // openWindow must be captured from a View context — reading @Environment
         // here in init() returns the default no-op and logs a SwiftUI warning.
