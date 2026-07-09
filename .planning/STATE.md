@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
 status: executing
-stopped_at: Completed 18-01-PLAN.md
-last_updated: "2026-07-09T12:24:34.290Z"
+stopped_at: Completed 18-02-PLAN.md
+last_updated: "2026-07-09T12:38:58.220Z"
 last_activity: 2026-07-09
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 18 (screen-capture-engine) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-07-09
 
@@ -63,6 +63,7 @@ Recent decisions affecting current work:
 - [v2.0]: Recording is user-initiated (manual / calendar prompt); auto-detection removed as trigger
 - [Phase 18]: 18-01: Pattern 1 concurrency (queue-confined final class + @unchecked Sendable WriterSink) proven green under strict concurrency; no @preconcurrency/nonisolated needed
 - [Phase 18]: 18-01: First-frame recipe B (startSession at first PTS) + ~2s static-screen keepalive chosen for Plan 18-02
+- [Phase 18]: 18-02: Live SCStream->AVAssetWriter capture landed; recipe-B first-frame anchor + ~2s static-screen keepalive + async non-blocking finalize; CaptureTarget kept non-Sendable (SCWindow), dims derived from filter.contentRect*pointPixelScale
 
 ### Pending Todos
 
@@ -85,11 +86,12 @@ Recent decisions affecting current work:
 | 260612-15a | Wire Sparkle auto-updates: updater controller + UI, SUFeedURL/SUPublicEDKey, appcast generation/signing/upload in release.sh | 2026-06-12 | f12b109 | [260612-15a-wire-sparkle-auto-updates-updater-contro](./quick/260612-15a-wire-sparkle-auto-updates-updater-contro/) |
 | 260701-xbi | CAL-03: fire the calendar record prompt a configurable lead time before start (default 2 min), now-injectable model helpers + lead-time service selection + 1/2/5-min Settings picker persisted in UserDefaults, README updated | 2026-07-01 | 84b1b3a | [260701-xbi-cal-03-fire-meeting-record-prompt-config](./quick/260701-xbi-cal-03-fire-meeting-record-prompt-config/) |
 | Phase 18 P01 | 11 | 3 tasks | 4 files |
+| Phase 18 P02 | 7 | 2 tasks | 1 files |
 
 ## Session Continuity
 
-Last session: 2026-07-09T12:24:08.198Z
+Last session: 2026-07-09T12:38:45.527Z
 Last activity: 2026-07-09
-Stopped at: Completed 18-01-PLAN.md
+Stopped at: Completed 18-02-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 18`

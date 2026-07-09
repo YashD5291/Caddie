@@ -15,7 +15,7 @@ Requirements for optional screen video capture during meeting recordings. Each m
 - [ ] **VID-04**: Video capture failure never aborts the audio recording — recording degrades to audio-only with the error logged and surfaced
 - [x] **VID-05**: Caddie's own windows are excluded from the capture (SCContentFilter exclusion)
 - [x] **VID-06**: User can choose a video quality preset in Settings (compact ~10 fps / balanced ~15 fps / high ~30 fps; HEVC with explicit bitrate caps)
-- [ ] **VID-07**: A crash or power loss during recording loses at most the last ~10 seconds of video; the partial file remains playable (fragmented .mov)
+- [x] **VID-07**: A crash or power loss during recording loses at most the last ~10 seconds of video; the partial file remains playable (fragmented .mov)
 
 ### Storage
 
@@ -74,7 +74,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | VID-05 | Phase 18 | Complete |
 | VID-06 | Phase 18 | Complete |
-| VID-07 | Phase 18 | Pending |
+| VID-07 | Phase 18 | Complete |
 | STOR-04 | Phase 18 | Complete |
 | VID-03 | Phase 19 | Pending |
 | VID-04 | Phase 19 | Pending |
