@@ -42,6 +42,154 @@ final class ScreenRecorder {
 
     private var sink: WriterSink?
     private var stream: SCStream?
+
+    /// Public lifecycle state, touched only in the owner's isolation domain (the
+    /// coordinator that owns this non-`Sendable` class). Distinct from `WriterSink`'s
+    /// own writerQueue-confined finalize guard — both use the same pure `transition`.
+    private var state: State = .idle
+
+    /// Longest capture edge in physical pixels (~1080p class). Retina input is
+    /// downscaled toward this clamp; the SAME dims feed the stream config and writer.
+    static let maxLongEdge = 1920
+
+    /// Static-screen keepalive re-append interval (18-01 decision: ~2s). Keeps
+    /// `movieFragmentInterval` flushing on static content so a kill-9 loses ≤ ~10s.
+    static let keepaliveInterval: TimeInterval = 2.0
+
+    /// True while a stream is actively capturing.
+    var isRecording: Bool { state == .recording }
+
+    /// What to capture. Display mode is the default; window mode is driven by
+    /// Phase 21 Settings. Caddie's own windows are excluded in display mode (VID-05).
+    ///
+    /// Not `Sendable`: the `.window` payload (`SCWindow`) is not `Sendable` on the SDK,
+    /// and this enum never crosses an isolation boundary — `ScreenRecorder` is itself a
+    /// non-`Sendable` class owned within a single isolation domain (the coordinator).
+    enum CaptureTarget {
+        /// A specific display, or `nil` for the main/first available display.
+        case display(CGDirectDisplayID?)
+        /// A specific window (non-default; Phase 21 supplies it).
+        case window(SCWindow)
+    }
+
+    /// Start a video-only SCStream feeding a crash-safe fragmented HEVC `.mov`.
+    /// Anchors the writer session on the first delivered frame and fires
+    /// `onFirstFrameHostTime` once with that frame's host tick (STOR-04).
+    /// No-op (idempotent) if already recording.
+    func start(target: CaptureTarget, preset: QualityPreset, outputURL: URL) async throws {
+        guard state == .idle else {
+            logger.warning("ScreenRecorder.start called while state=\(String(describing: self.state)) -- ignoring")
+            return
+        }
+
+        // 1. Build the content filter and derive the source pixel size from it
+        //    (contentRect is in points; pointPixelScale converts to physical pixels).
+        let filter = try await makeFilter(for: target)
+        let scale = CGFloat(filter.pointPixelScale)
+        let rect = filter.contentRect
+        let sourceWidthPx = Int((rect.width * scale).rounded())
+        let sourceHeightPx = Int((rect.height * scale).rounded())
+        guard sourceWidthPx > 0, sourceHeightPx > 0 else {
+            throw ScreenRecorderError.noDisplayAvailable
+        }
+
+        // 2. Compute dims ONCE — feed the SAME numbers to config AND writer (Pitfall 4).
+        let dims = Self.targetDimensions(
+            sourceWidthPx: sourceWidthPx,
+            sourceHeightPx: sourceHeightPx,
+            maxLongEdge: Self.maxLongEdge
+        )
+
+        // 3. SCStreamConfiguration (verbatim per RESEARCH config block).
+        let config = SCStreamConfiguration()
+        config.minimumFrameInterval = preset.minimumFrameInterval
+        config.width = dims.width
+        config.height = dims.height
+        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        config.queueDepth = 5
+        config.showsCursor = true
+        config.capturesAudio = false
+        config.scalesToFit = true
+        config.colorSpaceName = CGColorSpace.sRGB
+
+        // 4. AVAssetWriter — .mov + movieFragmentInterval BEFORE startWriting (VID-07).
+        let writer: AVAssetWriter
+        do {
+            writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+        } catch {
+            throw ScreenRecorderError.writerCreationFailed(error)
+        }
+        writer.movieFragmentInterval = CMTime(seconds: 10, preferredTimescale: 600)
+
+        let videoInput = AVAssetWriterInput(
+            mediaType: .video,
+            outputSettings: Self.videoSettings(for: preset, dimensions: dims)
+        )
+        videoInput.expectsMediaDataInRealTime = true
+        guard writer.canAdd(videoInput) else {
+            throw ScreenRecorderError.writerCreationFailed(
+                NSError(domain: "ScreenRecorder", code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "AVAssetWriter cannot add video input"])
+            )
+        }
+        writer.add(videoInput)
+        guard writer.startWriting() else {
+            throw ScreenRecorderError.writerCreationFailed(
+                writer.error ?? NSError(domain: "ScreenRecorder", code: -2,
+                                        userInfo: [NSLocalizedDescriptionKey: "AVAssetWriter startWriting failed"])
+            )
+        }
+        // startSession(atSourceTime:) is DEFERRED to the first delivered buffer (recipe B).
+
+        // 5. WriterSink + SCStream. Output callbacks are confined to writerQueue via
+        //    sampleHandlerQueue; delegate callbacks are re-dispatched onto it in the sink.
+        let sink = WriterSink(
+            writer: writer,
+            videoInput: videoInput,
+            queue: writerQueue,
+            onFirstFrameHostTime: onFirstFrameHostTime,
+            onStreamStopped: onStreamStopped
+        )
+        let stream = SCStream(filter: filter, configuration: config, delegate: sink)
+        do {
+            try stream.addStreamOutput(sink, type: .screen, sampleHandlerQueue: writerQueue)
+            try await stream.startCapture()
+        } catch {
+            // Never leave a half-open writer (mirror AudioRecorder rollback).
+            writer.cancelWriting()
+            throw ScreenRecorderError.streamStartFailed(error)
+        }
+
+        self.sink = sink
+        self.stream = stream
+        self.state = Self.transition(state, .started)
+
+        let targetDesc: String
+        switch target {
+        case .display(let id): targetDesc = "display(\(id.map(String.init) ?? "main"))"
+        case .window: targetDesc = "window"
+        }
+        logger.info("ScreenRecorder started: target=\(targetDesc, privacy: .public) preset=\(preset.rawValue, privacy: .public) dims=\(dims.width)x\(dims.height) -> \(outputURL.lastPathComponent, privacy: .public)")
+    }
+
+    /// Builds the `SCContentFilter` for the requested target. Display mode excludes
+    /// Caddie's own application windows via `excludedBundleIdentifiers` (VID-05).
+    private func makeFilter(for target: CaptureTarget) async throws -> SCContentFilter {
+        switch target {
+        case .display(let displayID):
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            let available = content.displays.map { $0.displayID }
+            guard let chosenID = Self.selectDisplayID(available: available, target: displayID),
+                  let display = content.displays.first(where: { $0.displayID == chosenID }) else {
+                throw ScreenRecorderError.noDisplayAvailable
+            }
+            let ownIDs = Self.excludedBundleIdentifiers(ownBundleID: Bundle.main.bundleIdentifier ?? "")
+            let caddieApps = content.applications.filter { ownIDs.contains($0.bundleIdentifier) }
+            return SCContentFilter(display: display, excludingApplications: caddieApps, exceptingWindows: [])
+        case .window(let window):
+            return SCContentFilter(desktopIndependentWindow: window)
+        }
+    }
 }
 
 // MARK: - QualityPreset (VID-06)
@@ -247,18 +395,121 @@ extension ScreenRecorder {
 /// and live here.
 final class WriterSink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
 
-    // AVAssetWriter + AVAssetWriterInput are non-`Sendable` and live here as stored
-    // fields, touched ONLY on writerQueue. Wired up in Plan 18-02.
-    private var writer: AVAssetWriter?
-    private var videoInput: AVAssetWriterInput?
+    private let logger = Logger(subsystem: "com.caddie.app", category: "ScreenRecorder")
 
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        // SCK delivers this on writerQueue (the sampleHandlerQueue). The non-Sendable
-        // CMSampleBuffer will be appended SYNCHRONOUSLY here to the confined, non-Sendable
-        // input — never captured across a queue hop. Live logic lands in Plan 18-02.
+    // AVAssetWriter + AVAssetWriterInput are non-`Sendable` and live here as stored
+    // fields, touched ONLY on writerQueue.
+    private let writer: AVAssetWriter
+    private let videoInput: AVAssetWriterInput
+
+    /// The confining serial queue. Output callbacks already arrive here (sampleHandlerQueue);
+    /// delegate callbacks and the keepalive timer are re-dispatched onto it.
+    private let queue: DispatchQueue
+
+    private let onFirstFrameHostTime: (@Sendable (UInt64) -> Void)?
+    private let onStreamStopped: (@Sendable (Error?) -> Void)?
+
+    // writerQueue-confined operational state.
+    private var state: ScreenRecorder.State = .recording
+    private var hasStartedSession = false
+    private var lastFrame: CMSampleBuffer?
+    private var lastAppendPTS: CMTime = .invalid
+    private var frameArrivedSinceKeepalive = false
+    private var keepaliveTimer: DispatchSourceTimer?
+
+    init(
+        writer: AVAssetWriter,
+        videoInput: AVAssetWriterInput,
+        queue: DispatchQueue,
+        onFirstFrameHostTime: (@Sendable (UInt64) -> Void)?,
+        onStreamStopped: (@Sendable (Error?) -> Void)?
+    ) {
+        self.writer = writer
+        self.videoInput = videoInput
+        self.queue = queue
+        self.onFirstFrameHostTime = onFirstFrameHostTime
+        self.onStreamStopped = onStreamStopped
+        super.init()
     }
 
+    // MARK: - SCStreamOutput (on writerQueue via sampleHandlerQueue)
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen else { return }
+        guard state == .recording else { return }
+
+        // Append only .complete frames (skip .idle/.blank/.suspended/.stopped junk).
+        guard let status = Self.frameStatus(of: sampleBuffer),
+              ScreenRecorder.frameAction(for: status) == .append else { return }
+        // A complete frame must carry a pixel buffer.
+        guard CMSampleBufferGetImageBuffer(sampleBuffer) != nil else { return }
+
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard pts.isValid else { return }
+
+        // First delivered .complete frame: anchor the session at its PTS (recipe B)
+        // and fire the STOR-04 host-tick anchor exactly once.
+        if !hasStartedSession {
+            guard writer.status == .writing else {
+                logger.error("First frame arrived but writer not writing (status=\(self.writer.status.rawValue))")
+                return
+            }
+            writer.startSession(atSourceTime: pts)
+            hasStartedSession = true
+            let hostTicks = CMClockConvertHostTimeToSystemUnits(pts)
+            onFirstFrameHostTime?(hostTicks)
+            logger.info("ScreenRecorder first frame anchored (hostTicks=\(hostTicks))")
+        }
+
+        // Cache for static-screen re-append (Plan 18-02 Task 2 keepalive + stop).
+        lastFrame = sampleBuffer
+        frameArrivedSinceKeepalive = true
+
+        appendIfMonotonic(sampleBuffer, pts: pts)
+    }
+
+    // MARK: - SCStreamDelegate
+
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        // on writerQueue — finalize + surface logic lands in Plan 18-02.
+        // Log + surface here; the finalize-a-playable-partial path lands in Task 2.
+        logger.error("SCStream stopped with error: \(error.localizedDescription)")
+        onStreamStopped?(error)
+    }
+
+    // MARK: - Append helpers (writerQueue)
+
+    /// Append a buffer only when the input is ready and the PTS strictly advances the
+    /// timeline — guards against out-of-order or duplicate timestamps on re-append.
+    private func appendIfMonotonic(_ buffer: CMSampleBuffer, pts: CMTime) {
+        guard videoInput.isReadyForMoreMediaData else {
+            logger.warning("Video input not ready for more media data -- dropping frame")
+            return
+        }
+        if lastAppendPTS.isValid && pts <= lastAppendPTS { return }
+        videoInput.append(buffer)
+        lastAppendPTS = pts
+    }
+
+    /// Reads the `SCStreamFrameInfo.status` attachment from a delivered buffer.
+    static func frameStatus(of sampleBuffer: CMSampleBuffer) -> SCFrameStatus? {
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
+                as? [[SCStreamFrameInfo: Any]],
+              let attachment = attachments.first,
+              let rawStatus = attachment[.status] as? Int,
+              let status = SCFrameStatus(rawValue: rawStatus) else {
+            return nil
+        }
+        return status
+    }
+}
+
+// MARK: - WriterSink finalize reason
+
+extension WriterSink {
+
+    /// Why the sink is being finalized — drives the terminal state.
+    enum FinalizeReason {
+        case stopped
+        case streamError
     }
 }
