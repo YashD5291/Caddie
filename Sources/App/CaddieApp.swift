@@ -28,7 +28,8 @@ struct CaddieApp: App {
         appDelegate.appState = appState
         // openWindow must be captured from a View context — reading @Environment
         // here in init() returns the default no-op and logs a SwiftUI warning.
-        // The capture happens in MenuBarView's .onAppear below.
+        // The capture happens in the MenuBarExtra LABEL's .onAppear below (see note
+        // there for why the label — not the content view — is the correct seam).
     }
 
     var body: some Scene {
@@ -36,27 +37,37 @@ struct CaddieApp: App {
             MenuBarView()
                 .environment(appState)
                 .environment(\.sparkleUpdaterController, appDelegate.updaterController)
-                .onAppear {
-                    // MenuBarExtra is created at launch — use this to open the main window.
-                    // SwiftUI Window scenes are lazy and won't auto-show alongside MenuBarExtra.
-                    appDelegate.openWindowAction = openWindow
-                    if !appState.hasOpenedMainWindow {
-                        appState.hasOpenedMainWindow = true
-                        openWindow(id: "main")
-                        NSApp.activate(ignoringOtherApps: true)
-                    }
-                }
         } label: {
-            switch appState.status {
-            case .idle:
-                Image(systemName: "mic.badge.plus")
-                    .symbolRenderingMode(.monochrome)
-            case .recording:
-                Image(systemName: "record.circle.fill")
-                    .symbolRenderingMode(.monochrome)
-            case .transcribing:
-                Image(systemName: "waveform")
-                    .symbolRenderingMode(.monochrome)
+            // Under `.menuBarExtraStyle(.menu)` the MenuBarExtra CONTENT view
+            // (MenuBarView above) is instantiated LAZILY — only when the user
+            // first clicks the menu bar icon. Its `.onAppear` therefore does NOT
+            // fire at launch. The LABEL below, however, renders immediately at
+            // launch (the mic icon is visible in the menu bar right away), so it
+            // is the only view guaranteed to run at startup. Capture the
+            // openWindow action and perform the one-time launch auto-open here.
+            Group {
+                switch appState.status {
+                case .idle:
+                    Image(systemName: "mic.badge.plus")
+                        .symbolRenderingMode(.monochrome)
+                case .recording:
+                    Image(systemName: "record.circle.fill")
+                        .symbolRenderingMode(.monochrome)
+                case .transcribing:
+                    Image(systemName: "waveform")
+                        .symbolRenderingMode(.monochrome)
+                }
+            }
+            .onAppear {
+                // Idempotent: the label may re-appear on redraws; re-assigning the
+                // same action is harmless, and the `hasOpenedMainWindow` guard makes
+                // the auto-open strictly one-time.
+                appDelegate.openWindowAction = openWindow
+                if !appState.hasOpenedMainWindow {
+                    appState.hasOpenedMainWindow = true
+                    openWindow(id: "main")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
             }
         }
         .menuBarExtraStyle(.menu)
@@ -95,15 +106,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         CaddieLogger.app.info("Caddie launched")
         UNUserNotificationCenter.current().delegate = self
         NotificationManager.requestAuthorization()
-
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(windowDidBecomeKey(_:)),
-            name: NSWindow.didBecomeKeyNotification, object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(windowWillClose(_:)),
-            name: NSWindow.willCloseNotification, object: nil
-        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -113,17 +115,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // MARK: - Reopen on Dock Click
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
-            NSApp.setActivationPolicy(.regular)
-            // Try existing window first, fall back to SwiftUI openWindow
-            if let window = Self.findMainWindow() {
-                window.makeKeyAndOrderFront(nil)
-            } else {
-                openWindowAction?(id: "main")
+        // Decide from our OWN window inventory, not the `flag` argument. For a
+        // MenuBarExtra + single-`Window` app, `hasVisibleWindows` is unreliable
+        // (status/menu-bar windows can make it true even when the main window is
+        // closed), which historically caused the reopen to be skipped.
+        let hasVisibleMainWindow = NSApp.windows.contains {
+            $0.isVisible && Self.isMainAppWindow($0)
+        }
+        if Self.shouldReopenMainWindow(hasVisibleMainWindow: hasVisibleMainWindow) {
+            // Converge on the proven menu-bar "Open Caddie" path: always drive the
+            // SwiftUI openWindow action. A closed single-`Window` scene retains its
+            // NSWindow, but SwiftUI has torn down its content — makeKeyAndOrderFront
+            // on that stale window does not restore it; only openWindow(id:) does.
+            guard let openWindowAction else {
+                // No silent failure (project rule). openWindowAction is captured in
+                // the MenuBarExtra label's .onAppear, which fires at launch — so nil
+                // here means the label has not rendered yet (should not happen in
+                // practice). Log so the regression is visible rather than a dead click.
+                CaddieLogger.app.warning(
+                    "Dock reopen requested but openWindowAction is nil — cannot open main window (label .onAppear has not run)"
+                )
+                return true
             }
+            NSApp.setActivationPolicy(.regular)
+            openWindowAction(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         }
         return true
+    }
+
+    /// Pure decision seam for Dock reopen: reopen the main window only when there
+    /// is no visible main window. Extracted so the reopen rule is unit-testable
+    /// without AppKit windows and guarded against regression.
+    static func shouldReopenMainWindow(hasVisibleMainWindow: Bool) -> Bool {
+        !hasVisibleMainWindow
     }
 
     // MARK: - OAuth URL Scheme Handler
@@ -141,25 +166,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
-    }
-
-    // MARK: - Window Lifecycle
-
-    @objc private func windowDidBecomeKey(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              Self.isMainAppWindow(window) else { return }
-        NSApp.setActivationPolicy(.regular)
-    }
-
-    @objc private func windowWillClose(_ notification: Notification) {
-        Task { @MainActor in
-            let hasVisibleMainWindow = NSApp.windows.contains {
-                $0.isVisible && Self.isMainAppWindow($0)
-            }
-            if !hasVisibleMainWindow {
-                NSApp.setActivationPolicy(.accessory)
-            }
-        }
     }
 
     // MARK: - Notification Handling
@@ -205,9 +211,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             && !window.className.contains("Settings")
             && !window.className.contains("MenuBar")
             && window.title.contains("Caddie")
-    }
-
-    static func findMainWindow() -> NSWindow? {
-        NSApp.windows.first(where: { isMainAppWindow($0) })
     }
 }
