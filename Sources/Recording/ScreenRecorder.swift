@@ -2,6 +2,7 @@ import AVFoundation
 import CoreMedia
 import Foundation
 import ScreenCaptureKit
+import VideoToolbox
 import os
 
 /// Captures a display or window as a video-only SCStream and encodes it to a
@@ -41,6 +42,97 @@ final class ScreenRecorder {
 
     private var sink: WriterSink?
     private var stream: SCStream?
+}
+
+// MARK: - QualityPreset (VID-06)
+
+extension ScreenRecorder {
+
+    /// Video quality presets owned by the engine. Phase 21 exposes the picker; the
+    /// engine defines the values now. Each preset pairs an fps throttle with an
+    /// EXPLICIT HEVC average-bitrate cap (uncapped VideoToolbox defaults are 40+ Mbps).
+    enum QualityPreset: String, CaseIterable, Sendable {
+        case compact
+        case balanced
+        case high
+
+        /// Default preset (~1.1 GB/hr at 1080p).
+        static var `default`: QualityPreset { .balanced }
+
+        /// Frames per second throttle (the dominant file-size lever).
+        var fps: Int {
+            switch self {
+            case .compact: return 10
+            case .balanced: return 15
+            case .high: return 30
+            }
+        }
+
+        /// Explicit HEVC average bitrate cap (bits/sec).
+        var bitrate: Int {
+            switch self {
+            case .compact: return 1_500_000
+            case .balanced: return 2_500_000
+            case .high: return 4_000_000
+            }
+        }
+
+        /// SCStreamConfiguration.minimumFrameInterval derived from `fps`.
+        var minimumFrameInterval: CMTime {
+            CMTime(value: 1, timescale: CMTimeScale(fps))
+        }
+    }
+}
+
+// MARK: - Pure config / dimension / anchor math
+
+extension ScreenRecorder {
+
+    /// Builds the AVAssetWriterInput video settings for a preset at fixed dimensions.
+    /// The bitrate key is ALWAYS present and equals the preset's cap (kills Pitfall 3,
+    /// uncapped bitrate). Width/height MUST equal the SCStreamConfiguration dimensions
+    /// (Pitfall 4). Pure builder — assertable without any hardware.
+    static func videoSettings(for preset: QualityPreset, dimensions: (width: Int, height: Int)) -> [String: Any] {
+        [
+            AVVideoCodecKey: AVVideoCodecType.hevc,
+            AVVideoWidthKey: dimensions.width,
+            AVVideoHeightKey: dimensions.height,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: preset.bitrate,
+                AVVideoExpectedSourceFrameRateKey: preset.fps,
+                AVVideoMaxKeyFrameIntervalDurationKey: 2.0,
+                AVVideoProfileLevelKey: kVTProfileLevel_HEVC_Main_AutoLevel,
+            ],
+        ]
+    }
+
+    /// Computes the target capture pixel dimensions: downscale the physical-pixel
+    /// source to the clamp preserving aspect ratio, rounding to even numbers (HEVC
+    /// requires even dimensions). No upscaling when already under the clamp. The SAME
+    /// numbers feed both the stream config and the writer input (Pitfall 4).
+    static func targetDimensions(sourceWidthPx: Int, sourceHeightPx: Int, maxLongEdge: Int) -> (width: Int, height: Int) {
+        let longEdge = max(sourceWidthPx, sourceHeightPx)
+        guard longEdge > maxLongEdge else {
+            return (roundToEven(sourceWidthPx), roundToEven(sourceHeightPx))
+        }
+        let scale = Double(maxLongEdge) / Double(longEdge)
+        let scaledWidth = Int((Double(sourceWidthPx) * scale).rounded())
+        let scaledHeight = Int((Double(sourceHeightPx) * scale).rounded())
+        return (roundToEven(scaledWidth), roundToEven(scaledHeight))
+    }
+
+    /// Rounds to the nearest even integer (>= 2), as required by HEVC dimensions.
+    private static func roundToEven(_ value: Int) -> Int {
+        let even = (value / 2) * 2
+        return max(2, even)
+    }
+
+    /// Converts mach host-clock ticks to seconds using a `mach_timebase_info`.
+    /// This is the STOR-04 anchor conversion the caller uses to turn the first-frame
+    /// host tick into seconds against the audio start host time.
+    static func hostTicksToSeconds(_ ticks: UInt64, timebase: mach_timebase_info_data_t) -> Double {
+        Double(ticks) * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000.0
+    }
 }
 
 // MARK: - WriterSink
