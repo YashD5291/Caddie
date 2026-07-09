@@ -42,6 +42,19 @@ enum ScreenRecorderHarness {
             // passed to the nonisolated async `start`; it is attached to the MainActor
             // region only after `start` returns by storing it in `retainedRecorder`.
             let recorder = ScreenRecorder()
+            // STOR-04 gate instrumentation: log the first-frame host-clock anchor
+            // relative to the capture-start request so 18-04 can measure the offset.
+            // Logged via os_log (not stdout) so it survives LaunchServices launches.
+            var mutableTimebase = mach_timebase_info_data_t()
+            mach_timebase_info(&mutableTimebase)
+            let timebase = mutableTimebase
+            let startTicks = mach_absolute_time()
+            recorder.onFirstFrameHostTime = { anchorTicks in
+                let deltaMs = (ScreenRecorder.hostTicksToSeconds(anchorTicks, timebase: timebase)
+                    - ScreenRecorder.hostTicksToSeconds(startTicks, timebase: timebase)) * 1000
+                Logger(subsystem: "com.caddie.app", category: "ScreenRecorderHarness")
+                    .info("HARNESS_FIRST_FRAME anchor_ticks=\(anchorTicks, privacy: .public) start_to_anchor_ms=\(deltaMs, format: .fixed(precision: 1), privacy: .public)")
+            }
             do {
                 try await recorder.start(
                     target: .display(nil),
