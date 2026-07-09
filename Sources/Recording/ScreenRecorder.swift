@@ -135,6 +135,109 @@ extension ScreenRecorder {
     }
 }
 
+// MARK: - State machine
+
+extension ScreenRecorder {
+
+    /// Internal recording lifecycle state.
+    enum State: Equatable {
+        case idle
+        case recording
+        case stopped
+        case failed
+    }
+
+    /// Events that drive the state machine.
+    enum StateEvent {
+        case started
+        case stopped
+        case failed
+    }
+
+    /// Pure state transition. Makes `stop()` idempotent by construction (mirrors
+    /// `AudioRecorder.stop()`'s `guard isRecording`): only `.recording` responds to
+    /// `.stopped`/`.failed`; every other pairing (incl. `.stopped`+`.stopped` and
+    /// `.idle`+`.stopped`) is an unchanged no-op — no illegal transition.
+    static func transition(_ state: State, _ event: StateEvent) -> State {
+        switch (state, event) {
+        case (.idle, .started): return .recording
+        case (.recording, .stopped): return .stopped
+        case (.recording, .failed): return .failed
+        default: return state
+        }
+    }
+}
+
+// MARK: - Frame-status decision
+
+extension ScreenRecorder {
+
+    /// Whether a delivered frame should be appended to the writer or skipped.
+    enum FrameAction: Equatable {
+        case append
+        case skip
+    }
+
+    /// Append only `.complete` frames; skip `.idle`/`.blank`/`.suspended`/`.stopped`
+    /// and any unknown status so the writer is never fed junk. (The live impl in Plan
+    /// 02 also caches each appended frame for static-screen re-append — that is an impl
+    /// detail; this function only decides append vs skip.)
+    static func frameAction(for status: SCFrameStatus) -> FrameAction {
+        switch status {
+        case .complete: return .append
+        default: return .skip
+        }
+    }
+}
+
+// MARK: - Filter-input selection (VID-05)
+
+extension ScreenRecorder {
+
+    /// Bundle ids to exclude from capture — Caddie's own app, so its windows never
+    /// appear (VID-05). Plan 02 maps this to `SCRunningApplication`s and builds the
+    /// real `SCContentFilter`. Application-level exclusion is more robust than window
+    /// enumeration (covers transient panels/menus).
+    static func excludedBundleIdentifiers(ownBundleID: String) -> [String] {
+        [ownBundleID]
+    }
+
+    /// Selects the display to capture: the `target` if present in `available`, else
+    /// the first available display, or `nil` when none exist (caller throws
+    /// `.noDisplayAvailable`).
+    static func selectDisplayID(available: [CGDirectDisplayID], target: CGDirectDisplayID?) -> CGDirectDisplayID? {
+        if let target, available.contains(target) {
+            return target
+        }
+        return available.first
+    }
+}
+
+// MARK: - Errors
+
+extension ScreenRecorder {
+
+    enum ScreenRecorderError: Error, LocalizedError {
+        case noDisplayAvailable
+        case writerCreationFailed(Error)
+        case streamStartFailed(Error)
+        case notRecording
+
+        var errorDescription: String? {
+            switch self {
+            case .noDisplayAvailable:
+                return "No display available to capture"
+            case .writerCreationFailed(let error):
+                return "Failed to create video writer: \(error.localizedDescription)"
+            case .streamStartFailed(let error):
+                return "Failed to start screen capture stream: \(error.localizedDescription)"
+            case .notRecording:
+                return "Screen recorder is not recording"
+            }
+        }
+    }
+}
+
 // MARK: - WriterSink
 
 /// The object SCK calls back on. Confined to `writerQueue`; `@unchecked Sendable` is
