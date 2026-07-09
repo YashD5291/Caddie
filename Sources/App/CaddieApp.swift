@@ -113,17 +113,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // MARK: - Reopen on Dock Click
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
+        // Decide from our OWN window inventory, not the `flag` argument. For a
+        // MenuBarExtra + single-`Window` app, `hasVisibleWindows` is unreliable
+        // (status/menu-bar windows can make it true even when the main window is
+        // closed), which historically caused the reopen to be skipped.
+        let hasVisibleMainWindow = NSApp.windows.contains {
+            $0.isVisible && Self.isMainAppWindow($0)
+        }
+        if Self.shouldReopenMainWindow(hasVisibleMainWindow: hasVisibleMainWindow) {
+            // Converge on the proven menu-bar "Open Caddie" path: always drive the
+            // SwiftUI openWindow action. A closed single-`Window` scene retains its
+            // NSWindow, but SwiftUI has torn down its content — makeKeyAndOrderFront
+            // on that stale window does not restore it; only openWindow(id:) does.
             NSApp.setActivationPolicy(.regular)
-            // Try existing window first, fall back to SwiftUI openWindow
-            if let window = Self.findMainWindow() {
-                window.makeKeyAndOrderFront(nil)
-            } else {
-                openWindowAction?(id: "main")
-            }
+            openWindowAction?(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         }
         return true
+    }
+
+    /// Pure decision seam for Dock reopen: reopen the main window only when there
+    /// is no visible main window. Extracted so the reopen rule is unit-testable
+    /// without AppKit windows and guarded against regression.
+    static func shouldReopenMainWindow(hasVisibleMainWindow: Bool) -> Bool {
+        !hasVisibleMainWindow
     }
 
     // MARK: - OAuth URL Scheme Handler
@@ -205,9 +218,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             && !window.className.contains("Settings")
             && !window.className.contains("MenuBar")
             && window.title.contains("Caddie")
-    }
-
-    static func findMainWindow() -> NSWindow? {
-        NSApp.windows.first(where: { isMainAppWindow($0) })
     }
 }
