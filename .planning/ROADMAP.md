@@ -106,7 +106,7 @@ Phases execute in numeric order: 18 → 19 → 20 → 21
 |-------|-----------|----------------|--------|-----------|
 | 1–10. Production Hardening | v1.0 | — | ✅ Complete | 2026-03-24 |
 | 11–17. Calendar + Remote Recording | v2.0 | — | ✅ Complete | 2026-07-01 |
-| 18. Screen Capture Engine | v3.0 | 4/4 | Complete   | 2026-07-09 |
+| 18. Screen Capture Engine | v3.0 | 4/4 | Complete    | 2026-07-09 |
 | 19. Recording Lifecycle Integration | v3.0 | 0/TBD | Not started | - |
 | 20. Video Storage & Retention | v3.0 | 0/TBD | Not started | - |
 | 21. Settings, Playback & Alignment | v3.0 | 0/TBD | Not started | - |

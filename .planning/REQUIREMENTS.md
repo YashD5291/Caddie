@@ -39,15 +39,18 @@ Requirements for optional screen video capture during meeting recordings. Each m
 Deferred to later milestones. Tracked but not in current roadmap.
 
 ### Resilience
+
 - **RES-01**: Recording session crash recovery (audio side)
 - **RES-02**: Automatic transcription retry with exponential backoff
 - **RES-03**: Proactive disk space monitoring during recording
 
 ### Intelligence
+
 - **INT-01**: AI summaries / action items from transcripts
 - **INT-02**: Multi-language transcription support
 
 ### Polish
+
 - **POL-01**: Structured error logging to file for bug reports
 - **POL-02**: Recording health dashboard in Settings
 
