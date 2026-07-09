@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
 status: executing
-stopped_at: Completed 18-03-PLAN.md
+stopped_at: Phase 18 paused at 18-04 human-verify checkpoint (user will run the 5 hardware checks later)
 last_updated: "2026-07-09T12:53:07.018Z"
 last_activity: 2026-07-09
 progress:
@@ -94,6 +94,6 @@ Recent decisions affecting current work:
 
 Last session: 2026-07-09T12:52:52.315Z
 Last activity: 2026-07-09
-Stopped at: Completed 18-03-PLAN.md
+Stopped at: Phase 18 paused at 18-04 human-verify checkpoint — awaiting user hardware checks (real capture, VID-05 exclusion, static duration, kill-9 gate, 14.2 TODO ack). Resume: present results, write 18-04-SUMMARY.md, then phase verification.
 Resume file: None
 Next: `/gsd:plan-phase 18`
