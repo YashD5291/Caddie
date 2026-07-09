@@ -72,4 +72,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (filled by roadmap) | | |
+| VID-05 | Phase 18 | Pending |
+| VID-06 | Phase 18 | Pending |
+| VID-07 | Phase 18 | Pending |
+| STOR-04 | Phase 18 | Pending |
+| VID-03 | Phase 19 | Pending |
+| VID-04 | Phase 19 | Pending |
+| STOR-01 | Phase 20 | Pending |
+| STOR-02 | Phase 20 | Pending |
+| STOR-03 | Phase 20 | Pending |
+| VID-01 | Phase 21 | Pending |
+| VID-02 | Phase 21 | Pending |
+| PLAY-01 | Phase 21 | Pending |
+| PLAY-02 | Phase 21 | Pending |
+| PLAY-03 | Phase 21 | Pending |
+| EXP-01 | Phase 21 | Pending |
+
+**Coverage:** 15/15 v3.0 requirements mapped — no orphans, no duplicates.
