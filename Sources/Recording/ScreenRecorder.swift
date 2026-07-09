@@ -160,6 +160,7 @@ final class ScreenRecorder {
             throw ScreenRecorderError.streamStartFailed(error)
         }
 
+        sink.startKeepalive(interval: Self.keepaliveInterval)
         self.sink = sink
         self.stream = stream
         self.state = Self.transition(state, .started)
@@ -189,6 +190,40 @@ final class ScreenRecorder {
         case .window(let window):
             return SCContentFilter(desktopIndependentWindow: window)
         }
+    }
+
+    /// Stop capture and finalize the file. Caller-driven (never driven by frame
+    /// arrival). Re-appends the cached last frame so duration ≈ wall clock, finishes
+    /// the input, and calls `finishWriting` ASYNC so app quit is never blocked
+    /// (Pitfall 7). Idempotent via the state guard — safe after `didStopWithError`.
+    func stop() async {
+        guard state == .recording else {
+            logger.info("ScreenRecorder.stop called while state=\(String(describing: self.state)) -- no-op")
+            return
+        }
+        state = Self.transition(state, .stopped)
+
+        let stream = self.stream
+        let sink = self.sink
+        self.stream = nil
+        self.sink = nil
+
+        if let stream {
+            do {
+                try await stream.stopCapture()
+            } catch {
+                logger.error("SCStream.stopCapture failed: \(error.localizedDescription)")
+            }
+        }
+        // Finalize on writerQueue; does not block on finishWriting's defragment pass.
+        sink?.finalize(reason: .stopped)
+    }
+
+    deinit {
+        // Defensive teardown: ensure the writer is finalized so no partial file is
+        // left unplayable if the owner drops us without calling stop(). The stream's
+        // own deinit stops capture. finalize() is idempotent + non-blocking.
+        sink?.finalize(reason: .stopped)
     }
 }
 
@@ -471,12 +506,103 @@ final class WriterSink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked S
     // MARK: - SCStreamDelegate
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        // Log + surface here; the finalize-a-playable-partial path lands in Task 2.
+        // Delegate callbacks are NOT guaranteed on writerQueue — re-dispatch so the
+        // finalize path touches writer/input only on the confining queue. Never leave
+        // an unfinalized writer on the error path (no silent failure — core value).
         logger.error("SCStream stopped with error: \(error.localizedDescription)")
         onStreamStopped?(error)
+        queue.async { [self] in
+            finalizeOnQueue(reason: .streamError)
+        }
+    }
+
+    // MARK: - Keepalive (writerQueue)
+
+    /// Starts a low-frequency timer that re-appends the cached last frame during static
+    /// stretches so `movieFragmentInterval` keeps flushing (Pitfall 2). Without this a
+    /// kill-9 on a static screen loses far more than one fragment.
+    func startKeepalive(interval: TimeInterval) {
+        queue.async { [self] in
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now() + interval, repeating: interval)
+            timer.setEventHandler { [self] in
+                keepaliveTick()
+            }
+            keepaliveTimer = timer
+            timer.resume()
+        }
+    }
+
+    private func keepaliveTick() {
+        guard state == .recording, hasStartedSession else { return }
+        // If a real frame arrived this interval, nothing to do — reset and wait.
+        if frameArrivedSinceKeepalive {
+            frameArrivedSinceKeepalive = false
+            return
+        }
+        // Static screen: re-append the cached frame at the current host time to keep
+        // fragments advancing.
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        reappendCachedFrame(at: now)
+    }
+
+    // MARK: - Finalize (writerQueue)
+
+    /// Public finalize entry — dispatches onto the confining queue. Idempotent.
+    func finalize(reason: FinalizeReason) {
+        queue.async { [self] in
+            finalizeOnQueue(reason: reason)
+        }
+    }
+
+    private func finalizeOnQueue(reason: FinalizeReason) {
+        // Idempotent: only .recording finalizes; a second call (stop after error, or
+        // stop twice) is a safe no-op via the pure transition.
+        let next = ScreenRecorder.transition(state, reason == .streamError ? .failed : .stopped)
+        guard next != state else { return }
+        state = next
+
+        keepaliveTimer?.cancel()
+        keepaliveTimer = nil
+
+        // Re-append the cached last frame retimed to stop-time so file duration ≈ wall
+        // clock (Pitfall 2) — only meaningful once the session has started.
+        if hasStartedSession {
+            let stopPTS = CMClockGetTime(CMClockGetHostTimeClock())
+            reappendCachedFrame(at: stopPTS)
+        }
+
+        guard writer.status == .writing else {
+            logger.warning("Finalize: writer not writing (status=\(self.writer.status.rawValue)); nothing to finish")
+            return
+        }
+        videoInput.markAsFinished()
+        writer.finishWriting { [logger, writer] in
+            if let error = writer.error {
+                logger.error("ScreenRecorder finishWriting error: \(error.localizedDescription)")
+            } else {
+                logger.info("ScreenRecorder writer finalized (\(String(describing: reason)))")
+            }
+        }
     }
 
     // MARK: - Append helpers (writerQueue)
+
+    /// Re-appends the cached last frame retimed to `pts` (static-screen keepalive + stop).
+    private func reappendCachedFrame(at pts: CMTime) {
+        guard let last = lastFrame else { return }
+        guard videoInput.isReadyForMoreMediaData else { return }
+        let timing = CMSampleTimingInfo(
+            duration: .invalid,
+            presentationTimeStamp: pts,
+            decodeTimeStamp: .invalid
+        )
+        guard let retimed = try? CMSampleBuffer(copying: last, withNewTiming: [timing]) else {
+            logger.warning("Failed to retime cached frame for re-append")
+            return
+        }
+        appendIfMonotonic(retimed, pts: pts)
+    }
 
     /// Append a buffer only when the input is ready and the PTS strictly advances the
     /// timeline — guards against out-of-order or duplicate timestamps on re-append.
