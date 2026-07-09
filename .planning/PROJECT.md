@@ -83,7 +83,7 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 
 **User context:** User joins meetings on a remote PC via Jump Desktop, with a Loopback virtual device routing that audio to the Mac; Caddie runs on the local Mac and captures from the selected input device.
 
-**Next milestone:** v3.0 Screen Recording (started 2026-07-09) — see Current Milestone above.
+**Next milestone:** v3.0 Screen Recording (started 2026-07-09) — see Current Milestone above. Phase 18 (Screen Capture Engine) complete 2026-07-10: `ScreenRecorder` verified 10/10 must-haves incl. hardware checks (HEVC ~1.2 Mbps, window exclusion, kill-9 recovery, static-screen keepalive, host-clock anchor). Outstanding: kill-9 gate re-run on a macOS 14.2 machine before v3.0 ships.
 
 ## Context
 
