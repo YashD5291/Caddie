@@ -1,193 +1,98 @@
-# Technology Stack
+# Stack Research
 
-**Project:** Caddie v2.0 -- Google Calendar + Audio Device Selection
-**Researched:** 2026-03-24
-**Scope:** NEW dependencies only. Existing stack (Swift 6.0, SwiftUI, GRDB, FluidAudio, SimplyCoreAudio, etc.) is validated and unchanged.
+**Domain:** macOS screen recording (Caddie v3.0 milestone — video capture additions to an existing Swift 6 audio pipeline)
+**Researched:** 2026-07-09 (22-agent workflow sweep + repo verification against live GitHub state)
+**Confidence:** HIGH
 
-## Recommended Stack Additions
+## Recommended Stack
 
-### Google OAuth2
+**Headline: zero new SPM dependencies.** The entire v3.0 stack is Apple system frameworks already linked or trivially linkable. The sweep evaluated 31 candidates (native APIs, SPM libraries, reference apps, commercial SDKs) and verified 16 against live repos — no viable OSS library exists for this feature (see "Why Zero Dependencies" below).
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| ASWebAuthenticationSession (AuthenticationServices) | System framework | OAuth2 login flow | Apple's first-party, secure browser-based auth. Already ships with macOS 14.2+. No third-party dependency needed. Handles the browser popup, redirect capture, and session cleanup. |
-| URLSession (Foundation) | System framework | Google Calendar REST API calls + token exchange | The Calendar API is a simple REST API with JSON responses. 3 endpoints needed (events.list, token exchange, token refresh). A dedicated Google API client library is massive overkill for read-only calendar access. |
-| Security (Keychain) | System framework | Store OAuth2 refresh token | SecItemAdd/SecItemCopyMatching for persisting the refresh token. Native macOS Keychain is the correct place for credentials. No wrapper library needed -- the API surface is small (add, query, update, delete). |
+### Core Technologies
 
-### Google Calendar API
+| Technology | Availability | Purpose | Why Recommended |
+|------------|--------------|---------|-----------------|
+| ScreenCaptureKit `SCStream` | macOS 12.3+ | Delivers CMSampleBuffers of a display or window | Apple's canonical capture path; fully available at Caddie's 14.2 floor with no availability guards |
+| `SCContentFilter` / `SCShareableContent` | macOS 12.3+ | Programmatic capture-target selection (display, single window, exclude Caddie's own windows) | Supports the Settings-driven display-vs-window choice without any picker UI; `SCContentFilter.includeMenuBar` is exactly 14.2+ |
+| `SCStreamConfiguration` | macOS 12.3+ | Resolution, `minimumFrameInterval` (frame-rate throttle), `queueDepth`, cursor, pixel format | 10–15 fps throttling and ~1080p downscale are the levers that make meeting-length files small; `captureResolution` control is 14.0+ |
+| AVFoundation `AVAssetWriter` + `AVAssetWriterInput` | all supported | Encodes SCStream buffers to HEVC/H.264 on disk | The mandatory write path at 14.2 (see SCRecordingOutput note); `AVVideoCodecType.hevc` routes to the Apple Silicon Media Engine via VideoToolbox — near-zero CPU |
+| `movieFragmentInterval` (QuickTime `.mov`) | all supported | Crash-safe fragmented writing | One property delivers "a crash loses at most the last fragment"; requires the QuickTime container, not `.mp4` |
+| AVKit (`VideoPlayer` / `AVPlayerView`) | all supported | In-app playback in MeetingDetailView | Native SwiftUI playback next to the existing audio player; no player dependency needed |
+| `SCContentSharingPicker` | macOS 14.0+ | Optional system picker for capture target | Available at 14.2 but **not recommended as the default** — interactive picker clashes with recording start flow; programmatic `SCShareableContent` selection fits better since Caddie already holds the TCC grant |
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| Google Calendar API v3 (REST) | v3 | Read upcoming meetings | Direct HTTP calls via URLSession. Endpoint: `GET /calendar/v3/calendars/primary/events`. Only read-only access needed. Scope: `calendar.events.readonly`. |
+### Recommended Encoding Configuration
 
-### Audio Device Selection
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| Codec | HEVC (`AVVideoCodecType.hevc`) | 40–60% smaller than H.264 at equal quality; hardware-encoded on every Apple Silicon Mac (14.2+ floor means no software-fallback risk) |
+| Frame rate | 10–15 fps (`minimumFrameInterval = CMTime(value: 1, timescale: 10...15)`) | Apple's own WWDC22 guidance for low-motion text/meeting content (~10 fps); fps is the dominant storage lever |
+| Bitrate | **Explicit** `AVVideoAverageBitRateKey` ≈ 2–3 Mbps | VideoToolbox/`AVOutputSettingsAssistant` defaults are camera-tuned and produce 40+ Mbps (18+ GB/hr) on screen content — must be capped explicitly |
+| Resolution | Display point resolution or ~1080p–1440p downscale | H.264 hard-caps at 4096×2304 (5K/6K displays must downscale); HEVC avoids the cap but downscaling still controls size |
+| Container | `.mov` with `movieFragmentInterval` ≈ 10 s | Fragmenting requires QuickTime file type; happy-path finish defragments to a normal moov |
+| Result | ~0.5–1.3 GB per meeting-hour | vs QuickTime screen-recording defaults at 6–12 GB/hr (15–25 Mbps H.264) |
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| SimplyCoreAudio | 4.x (existing) | Enumerate audio input devices | Already a dependency. Provides `allInputDevices`, device name, UID, manufacturer. Also provides `.deviceListDidChange` notification for hot-plug detection. Even though archived (Mar 2024), it works on macOS 14.2+ and the underlying CoreAudio APIs it wraps are stable. |
-| CoreAudio | System framework | Set capture device on AudioUnit | Already used by SystemAudioCapture. Device selection means passing a different `AudioDeviceID` to `kAudioOutputUnitProperty_CurrentDevice` instead of the aggregate device. |
+## SCRecordingOutput: Not Usable at the 14.2 Floor
 
-### Pre-Meeting Notifications
+macOS 15 Sequoia added `SCRecordingOutput` — attach it to an SCStream and ScreenCaptureKit writes the HEVC `.mov` itself (no AVAssetWriter, no retiming, no static-screen patching). **It is macOS 15+ only.** At Caddie's 14.2 deployment floor the SCStream → AVAssetWriter path is mandatory. An `#available(macOS 15, *)` branch to SCRecordingOutput would add a second code path and testing surface for no user-visible gain; treat it as a *future simplification* (delete the AVAssetWriter code when the minimum eventually moves to 15+), not something to build now. Note also its crash-recovery semantics are undocumented, whereas `movieFragmentInterval` behavior is well understood.
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| UserNotifications (UNUserNotificationCenter) | System framework | Schedule "Recording starts in 2 min" alerts | Apple's standard local notification API. Works on macOS 14.2+. Supports time-interval triggers, actionable notifications, and respects Do Not Disturb. No library needed. |
+## Why Zero Dependencies
 
-## What NOT to Add
+The sweep found **no viable OSS library**: the space is dominated by full apps and license-trapped code. wulkano/Aperture is the only real MIT SPM library — a small (3-file, not 1-file as sometimes claimed: `Aperture.swift` ~27KB, `Devices.swift`, `Utilities.swift`) SCStream → AVAssetWriter wrapper — but it is **dormant since Nov 2024** (v3.0.0 rewrite, zero commits since, ~20 months), swift-tools 5.7 with no Sendable/Swift-6 strict-concurrency audit (would need `@preconcurrency import`), no tests (issue #83), exposes no per-frame timestamp API for transcript alignment, and its wrapper is roughly the same size as writing the code directly. Everything else is an app to study or legally untouchable. Writing ~300–500 lines of owned, Swift-6-native, testable code beats depending on any of it.
 
-| Library | Why Not |
-|---------|---------|
-| **AppAuth-iOS** (openid/AppAuth-iOS v2.0.0) | Adds OAuth2 framework + OIDC discovery + session management for a flow that is ~150 lines of code with ASWebAuthenticationSession. Google's OAuth2 for desktop apps is well-documented with exact endpoints. AppAuth brings Objective-C bridging headers and complexity we don't need. |
-| **google-api-swift-client** (googleapis) | Archived Jan 2026. Was experimental, never reached 1.0. Dead project. |
-| **GoogleAPIClientForREST** (Obj-C) | Massive Objective-C library that generates typed clients for ALL Google APIs. We need exactly one endpoint (`events.list`). The JSON response is simple enough to decode with `Codable`. This library would be the single largest dependency in the app. |
-| **GTMAppAuth** (google/GTMAppAuth) | Companion to GoogleAPIClientForREST. Same problem -- heavy Objective-C dependency for a simple OAuth flow. |
-| **OAuthSwift** | Third-party OAuth library. ASWebAuthenticationSession is Apple's blessed solution and already handles the hard parts (secure browser, session isolation). Adding OAuthSwift just to avoid writing ~100 lines of token exchange code is not worth the dependency. |
-| **p2/OAuth2** | Another OAuth framework. Same reasoning as OAuthSwift -- we don't need a framework for a single-provider, single-scope OAuth flow. |
-| **KeychainAccess / SwiftKeychainWrapper** | Keychain wrapper libraries. The raw Security framework API for storing one refresh token is ~30 lines. A wrapper library for that is unnecessary. |
-| **Any new CoreAudio wrapper** | SimplyCoreAudio is archived but stable. The CoreAudio APIs it wraps haven't changed. Switching to a different wrapper introduces risk for no benefit. If SimplyCoreAudio breaks in a future macOS, we can fork or drop to raw CoreAudio (which SystemAudioCapture already uses directly). |
+## License Landscape (verified against live repos, 2026-07-09)
 
-## Alternatives Considered
+| Project | License | Stars | Status | Usable As |
+|---------|---------|-------|--------|-----------|
+| wulkano/Aperture v3 | MIT | 1,303 | Dormant since Nov 2024 (pre-Swift-6) | Reference implementation; vendorable in principle but no advantage over owning the code |
+| nonstrict-hq/ScreenCaptureKit-Recording-example | MIT | 63 | Frozen teaching artifact (Sept 2023) | **Primary blueprint** for the SCStream → AVAssetWriter pattern (companion to the Nonstrict blog series documenting first-frame drop + static-screen bugs) |
+| jasonzh0/CineScreen | MIT | 27 | Very active (v2.7.0 Jul 2026), macOS 14+ | Pattern reference at exactly Caddie's OS floor; note its "no dropped frames" claim applies to offline export, not live capture — study `Capture/` and `Export/` separately |
+| JerryZLiu/Dayflow | MIT | 6,630 | Very active; Swift/SwiftUI/**GRDB**/SCK | Identical stack to Caddie; pattern for low-FPS context capture + timestamps-in-SQLite (now uses `SCScreenshotManager` at ~0.1 fps, not continuous video) |
+| jsattler/BetterCapture | MIT | ~1,500 | Very active | Pattern-only — **requires macOS 15.2+**, so its SCRecordingOutput-era paths don't port to 14.2 |
+| lihaoyun6/QuickRecorder | **AGPL-3.0** | 8,480 | Slowing (last release Jun 2025) | Do not copy anything — AGPL contamination risk for a public MIT-badged repo |
+| Mnpn/Azayaka | **NO LICENSE FILE** (all rights reserved; verified via GitHub API) | 745 | Active-ish | Read-only architectural study; its `ClassicProcessing.swift` is the most compact real-app dual-path (AVAssetWriter 13/14 vs SCRecordingOutput 15+) demo — reimplement ideas, never copy |
+| screenpipe/screenpipe | **Proprietary** "Screenpipe Commercial License" (formerly MIT) | 19,700 | Very active (YC S26) | Schema pattern only (video_chunks + frames tables keyed by timestamp) |
+| CapSoftware/Cap | **AGPLv3** app / MIT only for `scap-*`/`camera-*` Rust crates | 20,000 | Very active | Rust/Tauri — no SPM path; API-checklist value only |
+| lzhgus/Capso | **BUSL-1.1** (→ Apache-2.0 Apr 2029) | ~1,000 | Active, macOS 15+ Swift 6 | Monorepo-internal SPM packages with local-path deps — not remotely consumable regardless of license |
+| nonstrict-hq/RecordKit | **Commercial closed-source** binary XCFramework | 4 | Professionally maintained | Disqualified: unauditable blob contradicts Caddie's verify-everything privacy posture |
+| wulkano/Kap | MIT | 19,300 | **Dead** (Electron 13, last release Oct 2022) | Nothing — historical validation of old Aperture only |
+| jasonjmcghee/rem | MIT | 2,500 | Dormant (May 2024) | Secondary Swift periodic-frame reference; bundles ffmpeg (avoid that pattern) |
+| OBS Studio | GPL-2.0 | 73,700 | Very active | Edge-case reference only (`plugins/mac-capture`); GPL, C/C++, ffmpeg pipeline — nothing transfers |
 
-| Category | Recommended | Alternative | Why Not |
-|----------|-------------|-------------|---------|
-| OAuth2 flow | ASWebAuthenticationSession + URLSession | AppAuth-iOS v2.0.0 | AppAuth adds Obj-C bridging, OIDC discovery we don't need, and complexity for a single-provider flow. ASWebAuthenticationSession + manual token exchange is simpler, testable, and dependency-free. |
-| Calendar API client | Direct URLSession + Codable | GoogleAPIClientForREST | One endpoint needed. Obj-C library is 10x heavier than needed. Direct REST is more maintainable and lets us control retry/error handling. |
-| Token storage | Security framework (Keychain) | UserDefaults | Never store OAuth tokens in UserDefaults. Keychain provides encryption at rest and proper access control. |
-| Device enumeration | SimplyCoreAudio (existing) | Raw CoreAudio APIs | Already a dependency, already used by MicStateMonitor. Provides clean Swift API for device listing and change notifications. |
-| Notifications | UNUserNotificationCenter | NSUserNotification (deprecated) | UNUserNotificationCenter is the modern API. NSUserNotification was deprecated in macOS 11. |
+## What NOT to Use
 
-## OAuth2 Flow Design
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| `AVCaptureScreenInput` + `AVCaptureMovieFileOutput` | Legacy pre-SCK path; display-only (can't exclude Caddie's windows), and Sonoma shows extra consent alerts for legacy capture APIs | SCStream + AVAssetWriter |
+| `CGDisplayStream` | Deprecated in macOS 14.0; triggers extra Sonoma consent alerts | ScreenCaptureKit |
+| `SCRecordingOutput` as the only path | macOS 15+ only; Caddie floor is 14.2 | AVAssetWriter path; revisit when floor rises |
+| `AVOutputSettingsAssistant` presets / default bitrate | Camera-oriented, 40+ Mbps on screen content | Explicit `AVVideoAverageBitRateKey` 2–3 Mbps |
+| ffmpeg sidecar (rem/screenpipe pattern) | Licensing + notarization liability; unnecessary with VideoToolbox | AVAssetWriter hardware encode |
+| Muxing audio into the video container | Couples video-writer failure to the audio (violates the "no lost recordings" core value); double-stores audio; WAV is the ASR source of truth | Separate video-only file + stored host-clock offset; optional `AVMutableComposition` mux at export time (no re-encode) |
+| Consolidating system audio into the video SCStream | System audio uses CoreAudio process taps (`SystemAudioCapture.swift`), not SCK — rewriting working code for no gain | Independent video-only SCStream with `capturesAudio = false` |
 
-**Client type:** Desktop application (Google Cloud Console)
-**Redirect method:** Custom URI scheme (`com.caddie.app:/oauth2redirect`) via ASWebAuthenticationSession
-**Why custom scheme over loopback:** ASWebAuthenticationSession natively supports custom URI schemes. No need to spin up a local HTTP server. Simpler, fewer moving parts. Google supports custom URI schemes for desktop apps. For Google specifically, the custom scheme is the reversed client ID (e.g., `com.googleusercontent.apps.CLIENT_ID:/oauth2redirect/google`).
+## Version Compatibility (macOS 14.2 floor)
 
-**Flow:**
-1. Generate PKCE code_verifier (43-128 char random string) + code_challenge (Base64URL-encoded SHA256)
-2. Open ASWebAuthenticationSession with Google's auth URL + PKCE params + scope
-3. User authenticates in system browser
-4. Redirect captured by ASWebAuthenticationSession with auth code
-5. Exchange auth code + code_verifier for access_token + refresh_token via URLSession POST
-6. Store refresh_token in Keychain (SecItemAdd with kSecClassGenericPassword)
-7. Use access_token for API calls; refresh when expired (HTTP 401 or proactive expiry check)
+| API | Min macOS | Available at 14.2? |
+|-----|-----------|--------------------|
+| SCStream / SCContentFilter / SCStreamConfiguration | 12.3 | Yes |
+| SCScreenshotManager, SCContentSharingPicker, `captureResolution` | 14.0 | Yes |
+| `SCContentFilter.includeMenuBar` | 14.2 | Yes (exactly) |
+| `SCRecordingOutput`, `SCStreamConfiguration.captureMicrophone`, presets | 15.0 | **No** |
+| `AVAssetWriter.movieFragmentInterval` | long-standing | Yes |
+| fMP4 segment delegate (`.mpeg4AppleHLS` + `preferredOutputSegmentInterval`) | 11.0 | Yes (alternative crash-safety pattern; more code, only needed if scrub-while-recording becomes a feature) |
 
-**Endpoints:**
-- Authorization: `https://accounts.google.com/o/oauth2/v2/auth`
-- Token exchange: `https://oauth2.googleapis.com/token`
-- Token refresh: `https://oauth2.googleapis.com/token` (with `grant_type=refresh_token`)
-- Events list: `GET https://www.googleapis.com/calendar/v3/calendars/primary/events`
+## Permissions
 
-**Scope:** `https://www.googleapis.com/auth/calendar.events.readonly` (minimum required for listing events with attendees)
-
-**Token lifecycle:**
-- Access tokens expire after ~1 hour
-- Refresh tokens are long-lived (persist across app restarts via Keychain)
-- On HTTP 401: use refresh token to get new access token, retry request
-- On refresh failure (revoked access): clear Keychain, prompt re-auth
-
-## Google Calendar API Usage
-
-**Polling strategy:** Poll every 60 seconds for events in a window of [now - 5min, now + 30min]. This catches:
-- Meetings starting soon (pre-meeting notification at T-2min)
-- Meetings currently happening (auto-start recording)
-- Recently ended meetings (grace period before stopping)
-
-**Key parameters:**
-```
-timeMin: ISO 8601 (now - 5 min)
-timeMax: ISO 8601 (now + 30 min)
-singleEvents: true (expand recurring events)
-orderBy: startTime
-maxResults: 10
-```
-
-**Response decoding:** Standard `Codable` structs for the Calendar Event JSON. Key fields: `summary`, `start.dateTime`, `end.dateTime`, `attendees[].email`, `status`, `conferenceData`.
-
-## Audio Device Selection Design
-
-**Current state:** SystemAudioCapture creates a process tap + aggregate device. MicrophoneCapture uses `AVAudioEngine.inputNode` which always uses the system default input device.
-
-**What changes for device selection:**
-1. New `AudioDeviceManager` class wrapping SimplyCoreAudio for device enumeration
-2. `MicrophoneCapture` needs a method to target a specific input device (not just default)
-3. `AudioRecorder.start()` gets an optional `inputDeviceID: AudioDeviceID?` parameter
-4. Settings UI gets a device picker dropdown
-5. Selected device UID stored in UserDefaults (survives app restart, UID is stable across reboots)
-
-**Device enumeration API (SimplyCoreAudio, already available):**
-```swift
-let sca = SimplyCoreAudio()
-let inputDevices = sca.allInputDevices  // includes virtual devices like Loopback
-// Each device has: .name, .uid, .manufacturer, .id (AudioDeviceID)
-```
-
-**Hot-plug detection (SimplyCoreAudio, already available):**
-```swift
-NotificationCenter.default.addObserver(forName: .deviceListDidChange, ...)
-```
-
-**Setting a specific input device on AVAudioEngine:**
-```swift
-// Get the AudioDeviceID for the selected device
-let deviceID: AudioDeviceID = selectedDevice.id
-var id = deviceID
-// Set on the AVAudioEngine's inputNode
-AudioUnitSetProperty(
-    engine.inputNode.audioUnit!,
-    kAudioOutputUnitProperty_CurrentDevice,
-    kAudioUnitScope_Global, 0,
-    &id, UInt32(MemoryLayout<AudioDeviceID>.size)
-)
-```
-
-## Entitlements Changes
-
-**Current entitlements:**
-- `com.apple.security.device.audio-input` (microphone)
-- `com.apple.security.personal-information.calendars` (EventKit)
-
-**New entitlements needed:** None. The app is not sandboxed (no `com.apple.security.app-sandbox`), so outgoing network connections for Google Calendar API work without additional entitlements.
-
-**Info.plist additions:**
-- `CFBundleURLTypes` with URL scheme for OAuth redirect (reversed client ID from Google Cloud Console)
-
-## Installation
-
-**No new SPM packages needed.** All new capabilities use system frameworks:
-
-```
-AuthenticationServices  -- ASWebAuthenticationSession (OAuth2 login)
-Security               -- Keychain (token storage)
-UserNotifications      -- UNUserNotificationCenter (pre-meeting alerts)
-Foundation/URLSession  -- Google Calendar REST API calls
-```
-
-Existing dependency SimplyCoreAudio already provides device enumeration.
-
-**project.yml changes:** None for dependencies. Only Info.plist and potentially entitlements need updating.
-
-## Confidence Assessment
-
-| Area | Confidence | Reason |
-|------|------------|--------|
-| OAuth2 flow (ASWebAuthenticationSession + PKCE) | HIGH | Apple first-party API, Google officially documents this flow for desktop apps, multiple verified examples |
-| Google Calendar REST API | HIGH | Official Google docs, well-documented REST endpoints, standard Codable decoding |
-| Keychain token storage | HIGH | Standard macOS pattern, Security framework is stable |
-| Audio device enumeration (SimplyCoreAudio) | HIGH | Already in use in MicStateMonitor, device listing API is straightforward |
-| Setting specific input device on AVAudioEngine | MEDIUM | CoreAudio API is documented but setting input device on AVAudioEngine.inputNode requires AudioUnit-level property manipulation. Needs testing with Loopback virtual device specifically. |
-| UNUserNotificationCenter for pre-meeting | HIGH | Standard macOS notification API, well-documented |
-| Zero new dependencies needed | MEDIUM | Validated that direct URLSession works for Calendar API. Token refresh edge cases (revocation, network errors) may surface complexity but not library-level complexity. |
+Video capture reuses the **existing Screen Recording TCC grant** — same TCC service Caddie already surfaces in Settings/Onboarding; users who passed onboarding can start video capture with no new prompt. Gap: `Permissions.screenRecording` (Sources/Utilities/Permissions.swift) only *checks* (CGWindowListCopyWindowInfo inference), it never *requests* — add `CGRequestScreenCaptureAccess()`. Caveat: on macOS 15 Sequoia, apps holding Screen Recording get a **monthly re-approval nag**; the `com.apple.developer.persistent-content-capture` entitlement suppresses it but Apple grants it mainly to remote-desktop apps via a request form — plan UX messaging instead.
 
 ## Sources
 
-- [Google OAuth2 for Desktop Apps](https://developers.google.com/identity/protocols/oauth2/native-app) -- Official flow documentation, endpoints, PKCE parameters
-- [Google Calendar Events.list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list) -- REST endpoint, parameters, response format
-- [Google Calendar API Scopes](https://developers.google.com/workspace/calendar/api/auth) -- `calendar.events.readonly` is minimum scope
-- [Loopback Migration Guide](https://developers.google.com/identity/protocols/oauth2/resources/loopback-migration) -- Confirms loopback NOT deprecated for desktop apps
-- [ASWebAuthenticationSession](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession) -- Apple docs
-- [AppAuth-iOS v2.0.0](https://github.com/openid/AppAuth-iOS/releases) -- Evaluated and rejected (too heavy for single-provider flow)
-- [google-api-swift-client](https://github.com/googleapis/google-api-swift-client) -- Archived Jan 2026, experimental, do not use
-- [GoogleAPIClientForREST](https://swiftpackageindex.com/google/google-api-objectivec-client-for-rest) -- Evaluated and rejected (massive Obj-C library for one endpoint)
-- [SimplyCoreAudio](https://github.com/rnine/SimplyCoreAudio) -- Archived Mar 2024, v4.1.1, but stable and already in use
-- [UNUserNotificationCenter](https://developer.apple.com/documentation/usernotifications/unusernotificationcenter) -- Apple docs for local notifications
-- [CoreAudio Device Enumeration Gist](https://gist.github.com/SteveTrewick/c0668ee438eb784cbc5fb4674f0c2cd1) -- Swift device listing patterns
+- developer.apple.com/documentation/screencapturekit (SCStream, SCContentFilter, SCRecordingOutput availability)
+- Apple WWDC22 10155/10156 (SCK performance, fps guidance for text content); WWDC24 10088 (SCRecordingOutput); WWDC20 10011 (fragmented MP4 authoring)
+- nonstrict.eu blog series "Recording to a file using ScreenCaptureKit" + MIT example repo — first-frame drop, static-screen duration
+- fatbobman.com ScreenSage post-mortem — BPP bitrate capping, SCK error -3821, `movieFragmentInterval` = 10 s in production
+- GitHub API license/activity verification of all 16 repos above (2026-07-09)
+
+---
+*Stack research for: Caddie v3.0 Screen Recording*
+*Researched: 2026-07-09 via 22-agent workflow sweep + repo verification*
