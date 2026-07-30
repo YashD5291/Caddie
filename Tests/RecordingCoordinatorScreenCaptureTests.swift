@@ -152,4 +152,135 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
         let active = await coordinator.isVideoActive
         XCTAssertTrue(active, "Video must be active while the meeting records")
     }
+
+    // MARK: - VID-04: Failure Containment
+
+    /// A start throw (the shape a denied TCC grant takes) degrades the meeting to
+    /// audio-only: still .recording, still recording in the DB, message surfaced once.
+    func testVideoStartFailureDegradesToAudioOnly() async throws {
+        let collector = ErrorCollector()
+        factory.startError = MockScreenRecorderError(message: "TCC denied")
+
+        let coordinator = makeCoordinator()
+        await coordinator.setOnVideoError { collector.append($0) }
+        await coordinator.handle(.manualStart(title: "Degrade Test"))
+        await settle()
+
+        guard let meetingId = await recordingMeetingId(coordinator) else {
+            XCTFail("A video start failure must leave the meeting in .recording")
+            return
+        }
+
+        let meeting = try await db.dbWriter.read { dbConn in
+            try Meeting.filter(Column("meeting_id") == meetingId).fetchOne(dbConn)
+        }
+        XCTAssertEqual(meeting?.status, .recording, "The audio recording must carry on untouched")
+
+        XCTAssertEqual(collector.messages.count, 1, "The failure must be surfaced exactly once")
+        XCTAssertTrue(collector.messages.first?.contains("TCC denied") == true,
+                      "Surfaced copy must carry the underlying error, got: \(collector.messages)")
+        let active = await coordinator.isVideoActive
+        XCTAssertFalse(active, "Video must be inactive after a start failure")
+    }
+
+    /// Audio-only completion: a meeting whose video never started still stops and
+    /// hands off to transcription normally.
+    func testVideoStartFailureStillCompletesMeeting() async {
+        factory.startError = MockScreenRecorderError(message: "TCC denied")
+
+        let coordinator = makeCoordinator()
+        await coordinator.handle(.manualStart(title: "Complete Test"))
+        await settle()
+
+        await coordinator.handle(.manualStop)
+
+        let state = await coordinator.state
+        guard case .transcribing = state else {
+            XCTFail("Expected .transcribing after stopping an audio-only meeting, got \(state)")
+            return
+        }
+    }
+
+    /// A mid-meeting stream death (SCK -3821 / window closed) surfaces a message and
+    /// leaves the audio recording running to normal completion.
+    func testStreamDeathMidMeetingSurfacesAndKeepsAudio() async {
+        let collector = ErrorCollector()
+        let coordinator = makeCoordinator()
+        await coordinator.setOnVideoError { collector.append($0) }
+        await coordinator.handle(.manualStart(title: "Death Test"))
+        await settle()
+
+        factory.latest?.simulateStreamDeath(MockScreenRecorderError(message: "-3821"))
+        await settle()
+
+        XCTAssertEqual(collector.messages.count, 1, "Stream death must be surfaced exactly once")
+        XCTAssertTrue(collector.messages.first?.contains("-3821") == true,
+                      "Surfaced copy must carry the SCK detail, got: \(collector.messages)")
+
+        let state = await coordinator.state
+        guard case .recording = state else {
+            XCTFail("Stream death must not disturb the recording state, got \(state)")
+            return
+        }
+
+        await coordinator.handle(.manualStop)
+        let finalState = await coordinator.state
+        guard case .transcribing = finalState else {
+            XCTFail("A meeting that lost video must still transcribe, got \(finalState)")
+            return
+        }
+    }
+
+    /// After a stream death the coordinator reports video inactive — the engine's own
+    /// `isRecording` keeps returning true, so the coordinator must not trust it.
+    func testStreamDeathMarksVideoInactive() async {
+        let coordinator = makeCoordinator()
+        await coordinator.handle(.manualStart(title: "Inactive Test"))
+        await settle()
+
+        let activeBefore = await coordinator.isVideoActive
+        XCTAssertTrue(activeBefore, "Video should be active before the stream dies")
+
+        factory.latest?.simulateStreamDeath(MockScreenRecorderError(message: "window closed"))
+        await settle()
+
+        let activeAfter = await coordinator.isVideoActive
+        XCTAssertFalse(activeAfter, "Video must read inactive once the stream is dead")
+    }
+
+    /// The hard VID-04 guarantee: no video failure mode may reach the .error state.
+    func testVideoFailureNeverEntersErrorState() async {
+        factory.startError = MockScreenRecorderError(message: "boom")
+        let coordinator = makeCoordinator()
+        await coordinator.handle(.manualStart(title: "No Error Test"))
+        await settle()
+
+        factory.latest?.simulateStreamDeath(MockScreenRecorderError(message: "also boom"))
+        await settle()
+
+        let state = await coordinator.state
+        if case .error = state {
+            XCTFail("A video failure must never drive the coordinator into .error")
+        }
+        guard case .recording = state else {
+            XCTFail("Expected the meeting to still be recording, got \(state)")
+            return
+        }
+    }
+}
+
+// MARK: - Test Helpers
+
+/// Collects messages surfaced on the coordinator's video-error channel. The callback
+/// fires from the coordinator's actor while the test body reads from the test executor,
+/// so the buffer is lock-guarded (same rationale as `MockStreamingEngine`).
+private final class ErrorCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _messages: [String] = []
+
+    func append(_ message: String) {
+        lock.withLock { _messages.append(message) }
+    }
+
+    var messages: [String] { lock.withLock { _messages } }
 }
