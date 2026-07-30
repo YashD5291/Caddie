@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
 status: executing
-stopped_at: Completed 19-02-PLAN.md
-last_updated: "2026-07-30T19:53:16.057Z"
+stopped_at: Completed 19-03-PLAN.md
+last_updated: "2026-07-30T20:17:15.630Z"
 last_activity: 2026-07-30
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
   percent: 25
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 19 (recording-lifecycle-integration) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-07-30
 
@@ -71,6 +71,9 @@ Recent decisions affecting current work:
 - [Phase 19]: 19-02: VideoContext.recorder is attached after start() returns — Swift 6 region isolation rejects storing the non-Sendable engine into actor state before the await start(...) call
 - [Phase 19]: 19-02: video start runs in an unstructured videoStartTask instead of inline await, so SCK's ~215ms setup never stalls the coordinator actor; 19-03 joins the task before stopping
 - [Phase 19]: 19-02: video failures use a dedicated setOnVideoError channel — never .error, never the fatal recording-error surface
+- [Phase 19]: 19-03: The capture engine is stored in a Sendable single-owner box (CaptureEngineBox) so the coordinator actor can call its nonisolated stop() — a bare stored engine is 'self'-isolated and region isolation rejects the send
+- [Phase 19]: 19-03: The compile-verified withTaskGroup stop-timeout race does not bound anything (a group awaits ALL children; Task<Void,Never>.value ignores cancellation) — the waiting child polls a lock-guarded latch instead
+- [Phase 19]: 19-03: A timed-out video stop never cancels the stop task — the coordinator stops waiting, the engine's finalize still completes in the background
 
 ### Pending Todos
 
@@ -97,11 +100,12 @@ Recent decisions affecting current work:
 | Phase 18 P03 | 18 | 2 tasks | 3 files |
 | Phase 19 P01 | 17 min | 3 tasks | 6 files |
 | Phase 19 P02 | 13 min | 2 tasks | 2 files |
+| Phase 19 P03 | 16 min | 2 tasks | 2 files |
 
 ## Session Continuity
 
-Last session: 2026-07-30T19:53:04.838Z
+Last session: 2026-07-30T20:16:19.348Z
 Last activity: 2026-07-09
-Stopped at: Completed 19-02-PLAN.md
+Stopped at: Completed 19-03-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 18`
