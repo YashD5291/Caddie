@@ -24,10 +24,61 @@ actor RecordingCoordinator {
     /// are loaded). The engine owns its ASR models — the coordinator passes none.
     private let liveTranscriber: LiveTranscriber?
 
+    /// Vends a fresh capture engine for each meeting. nil when screen recording is
+    /// off (the default), which makes every video code path inert.
+    ///
+    /// A FACTORY, not an instance, because `ScreenRecorder` is single-use: `start()`
+    /// guards `state == .idle` and `transition(.stopped, .started) == .stopped`, so a
+    /// second `start()` on the same object logs a warning and returns WITHOUT throwing.
+    /// One shared instance would therefore record nothing from meeting #2 onward, with
+    /// no error anywhere — precisely the silent failure this project forbids. A fresh
+    /// engine per meeting also makes the callback assignment correct by construction
+    /// (each engine's callbacks are set before its own `start`), and lets the engine's
+    /// defensive `deinit` finalize act as a second safety net for the file.
+    private let screenRecorderFactory: ScreenRecorderFactory?
+
     // MARK: - Callbacks
 
     private var onStateChange: (@Sendable (RecordingState) -> Void)?
     private var onPipelineStepChange: (@Sendable (PipelineStep) -> Void)?
+
+    /// Dedicated NON-FATAL channel for video failures (VID-04).
+    ///
+    /// Video failures must never drive the coordinator into `.error` — that would abort
+    /// the meeting, exactly what VID-04 forbids. And they must not reuse
+    /// `lastRecordingError`, which renders "Last recording failed" for a meeting whose
+    /// audio and transcript succeeded. Hence a separate channel with honest copy.
+    private var onVideoError: (@Sendable (String) -> Void)?
+
+    // MARK: - In-flight Video State
+
+    /// Video context for the meeting currently being recorded. nil when no video is
+    /// in flight (feature off, start failed, or the meeting ended).
+    private struct VideoContext {
+        let meetingId: String
+        let outputURL: URL
+        /// The engine writing this meeting's video.
+        ///
+        /// nil ONLY while the start call is still in flight. The context is published
+        /// before `start()` so an early first frame has somewhere to land, but the engine
+        /// itself cannot be stored that early: under Swift 6 region isolation, writing the
+        /// non-Sendable engine into actor state merges it into this actor's region, which
+        /// makes the subsequent `await recorder.start(...)` an illegal cross-domain send.
+        /// It is attached the instant start returns, and 19-03's teardown joins
+        /// `videoStartTask` first — so by the time anything needs it, it is non-nil.
+        var recorder: ScreenRecording?
+        /// Mach host ticks sampled the instant audio capture started —
+        /// the audio half of the STOR-04 anchor pair.
+        let audioStartTicks: UInt64
+        /// Host ticks of the first written video frame, from `onFirstFrameHostTime`.
+        var firstFrameTicks: UInt64?
+        /// Set when SCK reports the stream died mid-meeting. The context is deliberately
+        /// KEPT so teardown still finalizes the partial (playable) file.
+        var streamDied: Bool = false
+    }
+
+    private var videoContext: VideoContext?
+    private var videoStartTask: Task<Void, Never>?
 
     private let logger = Logger(subsystem: "com.caddie.app", category: "RecordingCoordinator")
 
@@ -39,7 +90,8 @@ actor RecordingCoordinator {
         pipeline: TranscriptionPipeline,
         detector: MeetingDetector,
         audioDeviceManager: AudioDeviceManager? = nil,
-        liveTranscriber: LiveTranscriber? = nil
+        liveTranscriber: LiveTranscriber? = nil,
+        screenRecorderFactory: ScreenRecorderFactory? = nil
     ) {
         self.database = database
         self.recorder = recorder
@@ -47,6 +99,7 @@ actor RecordingCoordinator {
         self.detector = detector
         self.audioDeviceManager = audioDeviceManager
         self.liveTranscriber = liveTranscriber
+        self.screenRecorderFactory = screenRecorderFactory
     }
 
     // MARK: - Public API
@@ -117,6 +170,24 @@ actor RecordingCoordinator {
     /// lets tests assert tee attach/detach without sharing the recorder.
     var isLiveTeeAttached: Bool {
         recorder.onSamples != nil
+    }
+
+    /// Whether a healthy video capture is in flight for the current meeting.
+    /// False once SCK reports a stream death, even though the engine's own
+    /// `isRecording` keeps returning true after that (it lies — see 19-RESEARCH).
+    var isVideoActive: Bool {
+        videoContext.map { !$0.streamDied } ?? false
+    }
+
+    /// The STOR-04 anchor pair for the in-flight meeting: audio-start host ticks and
+    /// (once the first frame is written) the first-frame host ticks.
+    var videoAnchorPair: (audio: UInt64, firstFrame: UInt64?)? {
+        videoContext.map { ($0.audioStartTicks, $0.firstFrameTicks) }
+    }
+
+    /// The `.mov` URL the in-flight capture is writing to.
+    var videoOutputURL: URL? {
+        videoContext?.outputURL
     }
     #endif
 
@@ -257,6 +328,7 @@ actor RecordingCoordinator {
             logger.info("Starting recorder for \(meetingId): device=\(selectedDeviceUID ?? "system-default") title=\"\(meeting.title)\" path=\(wavPath.lastPathComponent)")
 
             try recorder.start(outputPath: wavPath, deviceUID: selectedDeviceUID)
+            let audioStartTicks = mach_absolute_time()  // STOR-04 anchor, audio half
             recorder.onDeviceDisconnected = { [self] in
                 Task { await self.handle(.deviceDisconnected) }
             }
@@ -281,12 +353,125 @@ actor RecordingCoordinator {
                 }
             }
 
+            // Video is subordinate to audio: it starts only once audio is genuinely
+            // running, and nothing in the video path can precede, gate, or fail the
+            // audio start (VID-03 / VID-04).
+            startVideo(meetingId: meetingId, audioStartTicks: audioStartTicks)
+
             NotificationManager.recordingStarted(title: meeting.title)
             logger.info("Recording started for meeting \(meetingId)")
         } catch {
             logger.error("Failed to start recording \(meetingId): \(error.localizedDescription) (\(String(describing: error)))")
             await handle(.recordingFailed(error))
         }
+    }
+
+    // MARK: - Video Capture (VID-03 start half, VID-04 containment)
+
+    /// Kick off screen capture for this meeting. Synchronous by design: it schedules
+    /// the work and returns immediately.
+    ///
+    /// Awaiting ScreenCaptureKit setup inline would suspend this actor for ~215 ms
+    /// (measured in 18-04, dominated by `SCShareableContent` enumeration; a TCC prompt
+    /// makes it far longer). During that suspension the actor is free to process a
+    /// `.manualStop`, whose teardown would run while the start is still in flight —
+    /// orphaning a running capture with no owner. Holding the work in an unstructured
+    /// `Task` created in actor context (which inherits this actor's isolation) lets
+    /// 19-03's `stopVideo()` join it before stopping, closing that window without ever
+    /// stalling the audio start path.
+    private func startVideo(meetingId: String, audioStartTicks: UInt64) {
+        guard screenRecorderFactory != nil else { return }
+        videoStartTask = Task {
+            await self.startVideoInner(meetingId: meetingId, audioStartTicks: audioStartTicks)
+        }
+    }
+
+    private func startVideoInner(meetingId: String, audioStartTicks: UInt64) async {
+        guard let screenRecorderFactory else { return }
+
+        let recorder = screenRecorderFactory()
+        let url = AudioFileManager.videoPath(for: meetingId)
+
+        // Both callbacks MUST be assigned BEFORE start(): the engine's WriterSink is
+        // constructed with the CURRENT values of these closures, so assigning after
+        // start() is a silent no-op — no anchor, and no mid-meeting death signal.
+        recorder.onFirstFrameHostTime = { [weak self] ticks in
+            Task { await self?.recordFirstFrameAnchor(ticks) }
+        }
+        recorder.onStreamStopped = { [weak self] error in
+            Task { await self?.handleVideoStreamStopped(error) }
+        }
+
+        // Publish the context BEFORE starting, so a first frame delivered during the
+        // start call still finds somewhere to record its anchor.
+        videoContext = VideoContext(
+            meetingId: meetingId,
+            outputURL: url,
+            recorder: nil,
+            audioStartTicks: audioStartTicks
+        )
+
+        do {
+            // Phase 21 owns the user-facing target/preset choice; `.display(nil)` and
+            // `.balanced` are the interim defaults. Constructed at the call site, so the
+            // non-Sendable CaptureTarget is a disconnected region — no isolation problem.
+            try await recorder.start(target: .display(nil), preset: .balanced, outputURL: url)
+
+            guard videoContext?.meetingId == meetingId else {
+                // Teardown raced ahead of this start. 19-03 joins videoStartTask before
+                // stopping, so this is belt-and-braces — but a capture with no owner
+                // would keep writing forever, so stop it rather than leak it.
+                logger.warning("Screen capture start landed after teardown for \(meetingId) — stopping orphan")
+                await recorder.stop()
+                return
+            }
+            videoContext?.recorder = recorder
+            logger.info("Screen capture started for \(meetingId) -> \(url.lastPathComponent)")
+        } catch {
+            // VID-04: log, surface, and CONTINUE. Never handle(.recordingFailed(...)) —
+            // that would kill an audio recording that is working fine.
+            logger.error("Screen capture failed to start for \(meetingId): \(error.localizedDescription)")
+            surfaceVideoError("Screen recording unavailable — audio is still recording: \(error.localizedDescription)")
+            videoContext = nil
+        }
+    }
+
+    /// Video half of the STOR-04 anchor pair. Phase 20 persists this pair to the
+    /// meetings row; Phase 19 holds it in memory and logs the derived offset.
+    private func recordFirstFrameAnchor(_ ticks: UInt64) {
+        guard var ctx = videoContext else { return }
+        ctx.firstFrameTicks = ticks
+        videoContext = ctx
+
+        var timebase = mach_timebase_info_data_t()
+        mach_timebase_info(&timebase)
+        let offset = ScreenRecorder.hostTicksToSeconds(ticks, timebase: timebase)
+                   - ScreenRecorder.hostTicksToSeconds(ctx.audioStartTicks, timebase: timebase)
+        logger.info("Video anchor for \(ctx.meetingId): audioTicks=\(ctx.audioStartTicks) firstFrameTicks=\(ticks) offset=\(offset, format: .fixed(precision: 3))s")
+    }
+
+    /// Authoritative mid-meeting death signal (window closed, SCK error -3821). The
+    /// engine's own `isRecording` still reports true after this, so never key on it.
+    ///
+    /// The context is deliberately KEPT: teardown must still finalize the partial file,
+    /// which is playable per VID-07, and the engine's `stop()` is a safe no-op after a
+    /// stream error.
+    private func handleVideoStreamStopped(_ error: Error?) {
+        guard var ctx = videoContext else { return }
+        ctx.streamDied = true
+        videoContext = ctx
+
+        let detail = error?.localizedDescription ?? "stream ended unexpectedly"
+        logger.error("Screen capture stream stopped for \(ctx.meetingId): \(detail)")
+        surfaceVideoError("Screen recording stopped — audio is still recording (\(detail))")
+    }
+
+    /// The single exit for every video failure. Logs and hands the message to the
+    /// dedicated non-fatal channel. Never throws, never touches `state`, never calls
+    /// `handle` — a degraded recording is still a working recording.
+    private func surfaceVideoError(_ message: String) {
+        logger.error("Video error surfaced: \(message)")
+        onVideoError?(message)
     }
 
     private func executeStopAndTranscribe(meetingId: String) async {
