@@ -64,7 +64,13 @@
   3. A forced video-capture failure is logged and surfaced, and the audio recording still completes normally (degrades to audio-only)
   4. No video file is left open or corrupted when a meeting ends
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+- [ ] 19-01-PLAN.md — ScreenRecording protocol seam, opt-in settings gate, videoPath, mock/factory test doubles (TDD)
+- [ ] 19-02-PLAN.md — Per-meeting video start after audio + anchor pair + non-fatal onVideoError channel (VID-03/VID-04)
+- [ ] 19-03-PLAN.md — Teardown on every path (normal, disconnect, error, app quit) + bounded stop + second-meeting regression
+- [ ] 19-04-PLAN.md — AppState gated construction, lastVideoError surface in the menu bar, README
+- [ ] 19-05-PLAN.md — Hardware verification checkpoint (real capture, meeting #2, TCC-denied degrade, quit mid-recording)
 
 ### Phase 20: Video Storage & Retention
 
