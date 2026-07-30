@@ -116,3 +116,22 @@ created: 2026-07-31
 | 3 | Second meeting, same session | second distinct `.mov`, `isPlayable=true` | — | ⬜ |
 | 4 | TCC revoked | audio + transcript complete, menu-bar warning, no open `.mov` | — | ⬜ |
 | 5 | Quit mid-recording | `isPlayable=true`, ≤ ~10 s tail loss | — | ⬜ |
+
+---
+
+## Manual Gate Results (2026-07-10, executed by agent via AX automation + tccutil; user granted TCC once beforehand)
+
+Build: `~/Library/Developer/Xcode/DerivedData/Caddie-gaujkvsybzcmwgepbihhspvvoeyo/Build/Products/Debug/Caddie.app` (729 MB, ML models bundled). Feature enabled via `defaults write com.caddie.app screenRecordingEnabled -bool true`; deleted after the gate. Log stream captured to scratchpad (`caddie-19gate.log`).
+
+| # | Check | Result | Measured |
+|---|-------|--------|----------|
+| 1 | Real capture through real coordinator | ✅ PASS | Meeting 30 (`884dbf89-a39`): `VALIDATE isPlayable=true duration=303.99` exit 0; 94,581,489 B / 304 s ≈ 2.49 Mbps (balanced cap 2.5); transcript 3,860 chars, status `done`; `.mov` beside `.m4a`. Duration = true meeting length (stop was delayed by the confirm modal, see finding F1) |
+| 2 | Anchor logged (STOR-04 in-memory leg) | ✅ PASS | `Video anchor for <meetingId>: audioTicks=3364479915878 firstFrameTicks=3364486458157 offset=0.273s` — within expected setup-latency band (18-04 measured 0.215 s) |
+| 3 | Second meeting, same session (single-use regression) | ✅ PASS | Meeting 31 (`68d4c389-96d`): distinct `.mov`, `VALIDATE isPlayable=true duration=24.01` exit 0; 5,273,362 B ≈ 1.76 Mbps |
+| 5 | Quit mid-recording | ✅ PASS | Meeting 32 (`24204cea-ff5`): quit at ~23 s elapsed; `VALIDATE isPlayable=true duration=20.24` exit 0 — 2.8 s tail loss, within ≤10 s fragment window |
+| 4 | TCC-denied degrade (run LAST via `tccutil reset ScreenCapture com.caddie.app`) | ✅ PASS | Meeting 33 (`d784b771-9fb`): audio recorded + transcribed (`done`, no error); menu bar showed "⚠️ Screen recording stopped — audio was saved … The user declined TCCs …" + Dismiss action during recording; log has `Screen capture failed to start` + `Video error surfaced`; NO `.mov` created (no orphan) |
+
+Reorder note: check 4 was run last so the single unavoidable human action (re-granting Screen Recording in System Settings) happens once, after the gate. Grant re-request is pending with the user.
+
+### Finding F1 (pre-existing defect, NOT Phase 19 — logged for follow-up)
+`MenuBarView.confirmStopRecording()` uses `NSAlert.runModal()`. While the modal waits, the main thread is blocked → the audio drain `DispatchSourceTimer` (main queue) starves and the ~2 s SPSC ring buffer discards samples. Evidence: meeting 30 ran 304 s but its `.m4a` contains 63.2 s of audio — everything while the dialog sat open was silently dropped. Video (own queue) recorded the full 304 s. This violates the no-lost-audio core value independent of v3.0 and should be fixed (non-modal confirm, or drain off the main queue). Also caused three historic "why is my recording short?" risk. Surfaced only because this gate drove the UI exactly like a distracted human would.
