@@ -226,6 +226,56 @@ final class RecordingCoordinatorScreenCaptureTeardownTests: XCTestCase {
         XCTAssertEqual(factory.latest?.stopCallCount, 1,
                        "A dead stream must still be stopped so its partial file is finalized")
     }
+    // MARK: - VID-04: A wedged stop must not strand the meeting
+
+    /// The core-value guarantee: a wedged ScreenCaptureKit stop must never hold the
+    /// meeting hostage before `pipeline.enqueue`, or the recording sits in
+    /// "Processing…" forever — captured but never transcribed. The stop is bounded,
+    /// the timeout is surfaced to the user, and transcription proceeds regardless.
+    func testSlowVideoStopDoesNotBlockPipeline() async {
+        let collector = TeardownErrorCollector()
+        factory.stopDelay = .seconds(30)
+
+        let coordinator = makeCoordinator()
+        await coordinator.setOnVideoError { collector.append($0) }
+        await startMeeting(coordinator, title: "Wedged Stop")
+
+        let clock = ContinuousClock()
+        let began = clock.now
+        let stopTask = Task { await coordinator.handle(.manualStop) }
+
+        // The state machine must not be held hostage while the stop is in flight.
+        try? await Task.sleep(for: .milliseconds(200))
+        let midState = await coordinator.state
+        guard case .transcribing = midState else {
+            XCTFail("The meeting must reach .transcribing immediately, got \(midState)")
+            return
+        }
+        XCTAssertLessThan(clock.now - began, .seconds(2),
+                          "Reading state must not block behind the wedged video stop")
+
+        // handle() only returns once the meeting has been enqueued for transcription.
+        await stopTask.value
+        XCTAssertLessThan(clock.now - began, .seconds(15),
+                          "The bounded stop must give up long before the 30 s wedge clears")
+        XCTAssertFalse(collector.messages.isEmpty,
+                       "A timed-out video stop must be surfaced — the video may be incomplete")
+    }
+
+    /// The bounded stop must be invisible on the normal path: one stop, no error.
+    func testNormalStopSurfacesNoVideoError() async {
+        let collector = TeardownErrorCollector()
+        let coordinator = makeCoordinator()
+        await coordinator.setOnVideoError { collector.append($0) }
+        await startMeeting(coordinator, title: "Clean Stop")
+
+        await coordinator.handle(.manualStop)
+        await settle()
+
+        XCTAssertEqual(factory.latest?.stopCallCount, 1, "A clean stop finalizes exactly once")
+        XCTAssertTrue(collector.messages.isEmpty,
+                      "A stop that completes normally must surface nothing, got: \(collector.messages)")
+    }
 }
 
 // MARK: - Test Helpers
