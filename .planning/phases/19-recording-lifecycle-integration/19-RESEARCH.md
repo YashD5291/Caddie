@@ -673,7 +673,13 @@ Real SCStream capture cannot run in `make test` (TCC grant + a real display + it
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> Resolution record (2026-07-10, orchestrator + plan set `ca248f4`):
+> - Q1 error surfacing → RESOLVED: dedicated `lastVideoError`/`onVideoError` channel + menu-bar row (19-02/19-04); `lastRecordingError` untouched.
+> - Q2 single-use engine → RESOLVED: per-meeting factory injection (`ScreenRecorderFactory`), engine untouched (19-01/19-02/19-03).
+> - Q3 start reentrancy → RESOLVED: task-join Shape 1 — `stopVideo()` awaits the in-flight `videoStartTask` (19-02/19-03).
+> - Q4 stop timeout → RESOLVED: shipped — 5 s bounded race, surfaces video error, never blocks `pipeline.enqueue` (19-03-T2).
 
 1. **How should a non-fatal video error be "surfaced" (VID-04)?** — *needs a decision before planning*
    - What we know: the only existing user-visible error surface is `AppState.lastRecordingError` → `MenuBarView` "⚠️ Last recording failed: …", written **only** from the `.error` state and shown **only** in the `.idle` branch (`AppState.swift:177`, `MenuBarView.swift:26-31`). Video failures must not enter `.error`.

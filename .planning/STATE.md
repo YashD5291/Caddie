@@ -66,6 +66,7 @@ Recent decisions affecting current work:
 - [Phase 18]: 18-01: First-frame recipe B (startSession at first PTS) + ~2s static-screen keepalive chosen for Plan 18-02
 - [Phase 18]: 18-02: Live SCStream->AVAssetWriter capture landed; recipe-B first-frame anchor + ~2s static-screen keepalive + async non-blocking finalize; CaptureTarget kept non-Sendable (SCWindow), dims derived from filter.contentRect*pointPixelScale
 - [Phase 18]: 18-03: VID-07 crash-safety gated via a DEBUG launch-arg harness (--screen-record-harness / --validate-mov) reusing the app binary as a kill-able separate process + scripts/kill9-recovery-gate.sh (record→kill -9→assert playable, <=10s loss); live capture leg + 14.2-floor re-run deferred to 18-04 human checkpoint (headless env has no Screen Recording TCC)
+- [Phase 19 Planning 2026-07-10]: Two locked-context reinterpretations, forced by research findings and surfaced to user: (1) per-meeting FACTORY injection (`ScreenRecorderFactory`) instead of a literal single optional instance — research proved the engine is single-use (second start() silently no-ops; meeting #2 would lose video); (2) dedicated `lastVideoError` channel instead of reusing `lastRecordingError` — reuse would render "Last recording failed" for meetings whose audio succeeded. Also: stop-timeout (5s bounded race) shipped per planner judgment; reentrancy task-join guard.
 
 ### Pending Todos
 
