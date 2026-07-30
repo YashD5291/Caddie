@@ -35,6 +35,16 @@ enum AudioFileManager {
         audioDirectory.appendingPathComponent("\(meetingId).m4a")
     }
 
+    /// Returns the video (.mov) file path for a given meeting ID.
+    ///
+    /// Canonical layout: the video sits beside the meeting's audio files so a single
+    /// meeting id maps to exactly one `.mov`. Phase 20 owns deletion — `deleteAudio(meetingId:)`
+    /// intentionally does NOT remove this file yet, so deleting a meeting between
+    /// Phases 19 and 20 leaves its video orphaned (documented transient limitation).
+    static func videoPath(for meetingId: String) -> URL {
+        audioDirectory.appendingPathComponent("\(meetingId).mov")
+    }
+
     /// Compresses a WAV file to ALAC (.m4a) using ExtAudioFile API.
     @discardableResult
     static func compressToALAC(wavURL: URL, outputURL: URL) throws -> URL {
