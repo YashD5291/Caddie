@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
 status: executing
-stopped_at: Completed 19-03-PLAN.md
-last_updated: "2026-07-30T20:17:15.630Z"
+stopped_at: Completed 19-04-PLAN.md
+last_updated: "2026-07-30T20:28:58.295Z"
 last_activity: 2026-07-30
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
   percent: 25
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 19 (recording-lifecycle-integration) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-07-30
 
@@ -74,6 +74,9 @@ Recent decisions affecting current work:
 - [Phase 19]: 19-03: The capture engine is stored in a Sendable single-owner box (CaptureEngineBox) so the coordinator actor can call its nonisolated stop() — a bare stored engine is 'self'-isolated and region isolation rejects the send
 - [Phase 19]: 19-03: The compile-verified withTaskGroup stop-timeout race does not bound anything (a group awaits ALL children; Task<Void,Never>.value ignores cancellation) — the waiting child polls a lock-guarded latch instead
 - [Phase 19]: 19-03: A timed-out video stop never cancels the stop task — the coordinator stops waiting, the engine's finalize still completes in the background
+- [Phase 19]: 19-04: Screen recording is inert by ABSENCE, not by flag — the ScreenRecorderFactory is constructed only inside the ScreenRecordingSettings.isEnabled branch, so no downstream path re-checks the gate
+- [Phase 19]: 19-04: Permissions.screenRecording is logged for diagnostics but never gates construction — it is a window-name inference, so a false negative would silently disable video; a denied TCC grant is handled as a real start() throw on the non-fatal channel
+- [Phase 19]: 19-04: The video warning renders in the .recording menu-bar branch too (not just .idle) — a capture that dies mid-meeting would otherwise be invisible for the rest of the meeting
 
 ### Pending Todos
 
@@ -101,11 +104,12 @@ Recent decisions affecting current work:
 | Phase 19 P01 | 17 min | 3 tasks | 6 files |
 | Phase 19 P02 | 13 min | 2 tasks | 2 files |
 | Phase 19 P03 | 16 min | 2 tasks | 2 files |
+| Phase 19 P04 | 12 min | 2 tasks | 4 files |
 
 ## Session Continuity
 
-Last session: 2026-07-30T20:16:19.348Z
+Last session: 2026-07-30T20:28:58.286Z
 Last activity: 2026-07-09
-Stopped at: Completed 19-03-PLAN.md
+Stopped at: Completed 19-04-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 18`
