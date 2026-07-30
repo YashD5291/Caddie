@@ -35,6 +35,7 @@ Caddie lives in your menu bar and watches for meetings. When one starts, it reco
 | **Store** | Searchable local database with full-text search across all transcripts |
 | **Calendar** | Google Calendar integration — sign in via OAuth2, auto-detect remote meetings |
 | **Manual** | Start/stop recording anytime from the menu bar |
+| **Screen** | Optional screen recording — capture the meeting as video alongside the audio. Off by default, and a video failure never affects the audio recording or the transcript |
 | **Notify** | macOS notifications on recording start, transcription complete, and errors — plus a pre-meeting prompt a configurable lead time (default 2 min) before scheduled calendar meetings start |
 
 **Privacy-first.** All processing on-device. Network only for Google Calendar sync (optional) and Sparkle updates.
@@ -54,6 +55,15 @@ Caddie monitors active audio sessions via CoreAudio, window titles via Accessibi
 Google sign-in is required during onboarding and to unlock calendar features (today's schedule, calendar-based meeting prompts). Local recording, playback, and your recordings library remain fully usable even when signed out — the sidebar simply surfaces a compact sign-in card where the schedule would appear.
 
 After the meeting ends, a local ML pipeline runs Parakeet ASR and Sortformer speaker diarization on CoreML, accelerated by the Apple Neural Engine. The transcript with speaker labels is stored alongside ALAC-compressed audio in a GRDB-backed SQLite database, fully indexed for search.
+
+### Screen recording (opt-in, in progress)
+
+Caddie can also capture the meeting as video while it records audio. This is off by default and still landing, so a few things are worth knowing:
+
+- **There is no Settings toggle yet** — that arrives in a later release. To try it today, quit Caddie, run `defaults write com.caddie.app screenRecordingEnabled -bool true`, and relaunch. Turn it back off with `defaults write com.caddie.app screenRecordingEnabled -bool false`.
+- **Where the video goes.** Video is written next to the audio as `<meetingId>.mov` in `~/Library/Application Support/Caddie/audio/`.
+- **Known gaps.** Deleting a meeting does not yet remove its `.mov`, so the video file is left behind — clean it up by hand for now. The pre-recording disk-space guard also has not been raised to account for video (roughly 0.5–1.3 GB/hour). Both are being fixed next.
+- **Audio always wins.** If screen capture fails or the Screen Recording permission is denied, the meeting still records and transcribes audio normally — you just get an orange warning in the menu bar telling you the video stopped and the audio was saved.
 
 ## Architecture
 
@@ -119,7 +129,7 @@ To enable Google Calendar integration:
 | Permission | Why |
 |---|---|
 | **Microphone** | Record your voice during meetings |
-| **Screen Recording** | Capture system audio from meeting apps |
+| **Screen Recording** | Capture system audio from meeting apps — and, when screen recording is enabled, capture the meeting as video |
 | **Accessibility** | Detect active meeting windows |
 | **Google Calendar** | Display today's events and detect meetings (via OAuth2, no Apple Calendar needed) |
 | **Notifications** | Alert you when recordings start/stop and transcriptions complete |

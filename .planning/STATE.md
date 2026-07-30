@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
 status: executing
-stopped_at: "Phase 18 paused at 18-04 human-verify checkpoint — awaiting user hardware checks (real capture, VID-05 exclusion, static duration, kill-9 gate, 14.2 TODO ack). Resume: present results, write 18-04-SUMMARY.md, then phase verification."
-last_updated: "2026-07-09T19:42:15.286Z"
-last_activity: 2026-07-09
+stopped_at: Completed 19-04-PLAN.md
+last_updated: "2026-07-30T20:49:13.179Z"
+last_activity: 2026-07-30
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
-  percent: 25
+  completed_phases: 2
+  total_plans: 9
+  completed_plans: 9
+  percent: 50
 ---
 
 # Project State
@@ -21,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-09)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 18 — screen-capture-engine
+**Current focus:** Phase 19 — recording-lifecycle-integration
 
 ## Current Position
 
-Phase: 19
+Phase: 20
 Plan: Not started
 Status: Ready to execute
-Last activity: 2026-07-09
+Last activity: 2026-07-30
 
 ## Performance Metrics
 
 **Velocity (v1.0):**
 
-- Total plans completed: 23
+- Total plans completed: 28
 - Average duration: ~9 min
 - Total execution time: ~2.8 hours
 
@@ -66,6 +66,17 @@ Recent decisions affecting current work:
 - [Phase 18]: 18-01: First-frame recipe B (startSession at first PTS) + ~2s static-screen keepalive chosen for Plan 18-02
 - [Phase 18]: 18-02: Live SCStream->AVAssetWriter capture landed; recipe-B first-frame anchor + ~2s static-screen keepalive + async non-blocking finalize; CaptureTarget kept non-Sendable (SCWindow), dims derived from filter.contentRect*pointPixelScale
 - [Phase 18]: 18-03: VID-07 crash-safety gated via a DEBUG launch-arg harness (--screen-record-harness / --validate-mov) reusing the app binary as a kill-able separate process + scripts/kill9-recovery-gate.sh (record→kill -9→assert playable, <=10s loss); live capture leg + 14.2-floor re-run deferred to 18-04 human checkpoint (headless env has no Screen Recording TCC)
+- [Phase 19 Planning 2026-07-10]: Two locked-context reinterpretations, forced by research findings and surfaced to user: (1) per-meeting FACTORY injection (`ScreenRecorderFactory`) instead of a literal single optional instance — research proved the engine is single-use (second start() silently no-ops; meeting #2 would lose video); (2) dedicated `lastVideoError` channel instead of reusing `lastRecordingError` — reuse would render "Last recording failed" for meetings whose audio succeeded. Also: stop-timeout (5s bounded race) shipped per planner judgment; reentrancy task-join guard.
+- [Phase 19]: 19-01: ScreenRecording seam added by retroactive conformance in a NEW file — the hardware-verified Phase 18 engine file keeps a zero diff; feature gate reads object(forKey:) so absent-key can never read as enabled (VID-01 opt-in) — Keeps 18-04's hardware verification valid without a re-run, and makes the opt-in semantic provable by test
+- [Phase 19]: 19-02: VideoContext.recorder is attached after start() returns — Swift 6 region isolation rejects storing the non-Sendable engine into actor state before the await start(...) call
+- [Phase 19]: 19-02: video start runs in an unstructured videoStartTask instead of inline await, so SCK's ~215ms setup never stalls the coordinator actor; 19-03 joins the task before stopping
+- [Phase 19]: 19-02: video failures use a dedicated setOnVideoError channel — never .error, never the fatal recording-error surface
+- [Phase 19]: 19-03: The capture engine is stored in a Sendable single-owner box (CaptureEngineBox) so the coordinator actor can call its nonisolated stop() — a bare stored engine is 'self'-isolated and region isolation rejects the send
+- [Phase 19]: 19-03: The compile-verified withTaskGroup stop-timeout race does not bound anything (a group awaits ALL children; Task<Void,Never>.value ignores cancellation) — the waiting child polls a lock-guarded latch instead
+- [Phase 19]: 19-03: A timed-out video stop never cancels the stop task — the coordinator stops waiting, the engine's finalize still completes in the background
+- [Phase 19]: 19-04: Screen recording is inert by ABSENCE, not by flag — the ScreenRecorderFactory is constructed only inside the ScreenRecordingSettings.isEnabled branch, so no downstream path re-checks the gate
+- [Phase 19]: 19-04: Permissions.screenRecording is logged for diagnostics but never gates construction — it is a window-name inference, so a false negative would silently disable video; a denied TCC grant is handled as a real start() throw on the non-fatal channel
+- [Phase 19]: 19-04: The video warning renders in the .recording menu-bar branch too (not just .idle) — a capture that dies mid-meeting would otherwise be invisible for the rest of the meeting
 
 ### Pending Todos
 
@@ -90,11 +101,15 @@ Recent decisions affecting current work:
 | Phase 18 P01 | 11 | 3 tasks | 4 files |
 | Phase 18 P02 | 7 | 2 tasks | 1 files |
 | Phase 18 P03 | 18 | 2 tasks | 3 files |
+| Phase 19 P01 | 17 min | 3 tasks | 6 files |
+| Phase 19 P02 | 13 min | 2 tasks | 2 files |
+| Phase 19 P03 | 16 min | 2 tasks | 2 files |
+| Phase 19 P04 | 12 min | 2 tasks | 4 files |
 
 ## Session Continuity
 
-Last session: 2026-07-09T12:52:52.315Z
+Last session: 2026-07-30T20:28:58.286Z
 Last activity: 2026-07-09
-Stopped at: Phase 18 paused at 18-04 human-verify checkpoint — awaiting user hardware checks (real capture, VID-05 exclusion, static duration, kill-9 gate, 14.2 TODO ack). Resume: present results, write 18-04-SUMMARY.md, then phase verification.
+Stopped at: Completed 19-04-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 18`

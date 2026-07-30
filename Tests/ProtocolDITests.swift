@@ -34,4 +34,25 @@ final class ProtocolDITests: XCTestCase {
         let pipeline = TranscriptionPipeline(asr: mockASR, diarization: mockDiarization)
         XCTAssertNotNil(pipeline)
     }
+
+    // MARK: - ScreenRecording seam (Phase 19)
+
+    func testScreenRecorderConformsToScreenRecording() {
+        // The annotation is the assertion: this line fails to compile unless the
+        // Phase 18 engine satisfies the seam the coordinator will depend on.
+        // Constructing the engine starts no capture and needs no TCC grant.
+        let recorder: ScreenRecording = ScreenRecorder()
+        XCTAssertFalse(recorder.isRecording)
+    }
+
+    func testScreenRecorderFactoryVendsFreshInstances() {
+        let factory: ScreenRecorderFactory = { ScreenRecorder() }
+        let a = factory()
+        let b = factory()
+
+        // Per-meeting-instance contract: ScreenRecorder is single-use (a second
+        // start() on a stopped instance silently no-ops), so plans 19-02/19-03
+        // rely on every call vending a distinct object.
+        XCTAssertFalse(a === b)
+    }
 }

@@ -23,6 +23,7 @@ struct MenuBarView: View {
     private var statusSection: some View {
         switch appState.status {
         case .idle:
+            videoErrorRow
             if let recordingError = appState.lastRecordingError {
                 Text("\u{26A0}\u{FE0F} Last recording failed: \(recordingError)")
                     .foregroundStyle(.red)
@@ -44,6 +45,7 @@ struct MenuBarView: View {
             .disabled(appState.coordinator == nil)
 
         case .recording:
+            videoErrorRow
             Text("\u{1F534} \(appState.currentMeetingTitle ?? "Recording...")")
             Text("Recording \u{00B7} \(Formatters.duration(seconds: Int(appState.recordingDuration)))")
             Button {
@@ -56,6 +58,21 @@ struct MenuBarView: View {
             Text("Processing...")
             Text(pipelineStepLabel(appState.pipelineStep))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The non-fatal video surface (VID-04). Rendered in BOTH the idle and recording
+    /// branches: a degraded capture matters most while the meeting is still running,
+    /// which is exactly when the idle-only error row is invisible. Orange, not red, and
+    /// explicit that the audio survived — this is a degradation, not a failed recording.
+    @ViewBuilder
+    private var videoErrorRow: some View {
+        if let videoError = appState.lastVideoError {
+            Text("\u{26A0}\u{FE0F} Screen recording stopped \u{2014} audio was saved: \(videoError)")
+                .foregroundStyle(.orange)
+            Button("Dismiss Video Warning") {
+                appState.clearVideoError()
+            }
         }
     }
 

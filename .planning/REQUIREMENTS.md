@@ -11,8 +11,8 @@ Requirements for optional screen video capture during meeting recordings. Each m
 
 - [ ] **VID-01**: User can enable/disable screen recording via a Settings toggle (off by default)
 - [ ] **VID-02**: User can choose the capture target in Settings: full display or meeting window
-- [ ] **VID-03**: When enabled, video capture starts and stops automatically with the meeting recording lifecycle (manual and calendar-prompted recordings alike)
-- [ ] **VID-04**: Video capture failure never aborts the audio recording — recording degrades to audio-only with the error logged and surfaced
+- [x] **VID-03**: When enabled, video capture starts and stops automatically with the meeting recording lifecycle (manual and calendar-prompted recordings alike)
+- [x] **VID-04**: Video capture failure never aborts the audio recording — recording degrades to audio-only with the error logged and surfaced
 - [x] **VID-05**: Caddie's own windows are excluded from the capture (SCContentFilter exclusion)
 - [x] **VID-06**: User can choose a video quality preset in Settings (compact ~10 fps / balanced ~15 fps / high ~30 fps; HEVC with explicit bitrate caps)
 - [x] **VID-07**: A crash or power loss during recording loses at most the last ~10 seconds of video; the partial file remains playable (fragmented .mov)
@@ -79,8 +79,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VID-06 | Phase 18 | Complete |
 | VID-07 | Phase 18 | Complete |
 | STOR-04 | Phase 18 | Complete |
-| VID-03 | Phase 19 | Pending |
-| VID-04 | Phase 19 | Pending |
+| VID-03 | Phase 19 | Complete |
+| VID-04 | Phase 19 | Complete |
 | STOR-01 | Phase 20 | Pending |
 | STOR-02 | Phase 20 | Pending |
 | STOR-03 | Phase 20 | Pending |
