@@ -59,6 +59,15 @@ final class AppState {
     /// Cleared when the next recording starts successfully.
     var lastRecordingError: String?
 
+    /// The dedicated NON-FATAL video channel (VID-04). Set when screen capture
+    /// degrades — a start throw, a mid-meeting stream death, or a stop that did not
+    /// finish cleanly — while the meeting's audio and transcript succeed normally.
+    ///
+    /// Deliberately separate from the fatal surface above: reusing that one would tell
+    /// the user "Last recording failed" about a meeting whose audio and transcript are
+    /// perfectly intact. Cleared when the next recording starts, or by the user.
+    var lastVideoError: String?
+
     /// Internal task that survives view lifecycle cancellation.
     private var initTask: Task<Void, Never>?
 
@@ -140,13 +149,30 @@ final class AppState {
                 liveTranscriber = lt
             }
 
+            // 5b. Screen capture is opt-in (VID-01) and off by default. The factory is
+            // constructed ONLY when the key is on, so with the feature off the coordinator's
+            // dependency is nil and every video code path is inert — capture can never start
+            // by accident.
+            //
+            // Permissions.screenRecording is logged for diagnostics but is deliberately NOT
+            // a gate: it is an inference (foreign window-name probing), so a false negative
+            // would silently disable video with no error. Constructing anyway means a denied
+            // TCC grant arrives as a real start() throw that the coordinator logs and surfaces
+            // on the non-fatal video channel.
+            var screenRecorderFactory: ScreenRecorderFactory?
+            if ScreenRecordingSettings.isEnabled {
+                screenRecorderFactory = { ScreenRecorder() }
+                logger.info("Screen recording enabled (permission status: \(String(describing: Permissions.screenRecording)))")
+            }
+
             let newCoordinator = RecordingCoordinator(
                 database: db,
                 recorder: AudioRecorder(),
                 pipeline: pipeline,
                 detector: MeetingDetector(),
                 audioDeviceManager: deviceManager,
-                liveTranscriber: liveTranscriber
+                liveTranscriber: liveTranscriber,
+                screenRecorderFactory: screenRecorderFactory
             )
 
             // 6. Wire coordinator state changes to observable properties
@@ -167,6 +193,9 @@ final class AppState {
                         self.status = .recording
                         self.recordingStartTime = Date()
                         self.lastRecordingError = nil
+                        // A new meeting starts with a clean video surface. Any video failure
+                        // for THIS meeting is surfaced after this point, so it is never erased.
+                        self.lastVideoError = nil
                         self.clearLiveTranscript()
                     case .transcribing:
                         self.status = .transcribing
@@ -184,6 +213,15 @@ final class AppState {
                 Task { @MainActor in
                     guard let self else { return }
                     self.pipelineStep = step
+                }
+            }
+
+            // Wire the non-fatal video channel to its own observable (VID-04). This must
+            // never touch status or the fatal recording-error surface: the meeting keeps
+            // recording audio and still transcribes.
+            await newCoordinator.setOnVideoError { [weak self] message in
+                Task { @MainActor in
+                    self?.applyVideoError(message)
                 }
             }
 
@@ -240,6 +278,19 @@ final class AppState {
     func clearLiveTranscript() {
         liveConfirmedText = ""
         liveVolatileText = ""
+    }
+
+    // MARK: - Video Error (non-fatal)
+
+    /// Record a degraded screen capture. The audio recording and transcript are unaffected.
+    func applyVideoError(_ message: String) {
+        lastVideoError = message
+        logger.error("Screen recording degraded: \(message)")
+    }
+
+    /// User dismissed the video warning, or a new recording started.
+    func clearVideoError() {
+        lastVideoError = nil
     }
 
     // MARK: - UI Actions (delegate to coordinator)
