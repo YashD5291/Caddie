@@ -46,8 +46,9 @@ actor RecordingCoordinator {
     ///
     /// Video failures must never drive the coordinator into `.error` — that would abort
     /// the meeting, exactly what VID-04 forbids. And they must not reuse
-    /// `lastRecordingError`, which renders "Last recording failed" for a meeting whose
-    /// audio and transcript succeeded. Hence a separate channel with honest copy.
+    /// AppState's fatal recording-error surface, which renders "Last recording failed"
+    /// for a meeting whose audio and transcript succeeded. Hence a separate channel
+    /// with honest copy.
     private var onVideoError: (@Sendable (String) -> Void)?
 
     // MARK: - In-flight Video State
@@ -111,6 +112,19 @@ actor RecordingCoordinator {
 
     func setOnPipelineStepChange(_ callback: (@Sendable (PipelineStep) -> Void)?) {
         self.onPipelineStepChange = callback
+    }
+
+    /// Set the non-fatal video-error callback (VID-04). Fires for every screen-capture
+    /// failure — start throw, mid-meeting stream death, stop failure — while the audio
+    /// recording carries on to normal completion.
+    ///
+    /// Deliberately separate from the recording-error path: a video failure must never
+    /// drive the coordinator into `.error` (that would abort a meeting whose audio is
+    /// fine), and it must never write AppState's fatal recording-error surface, which
+    /// the menu bar renders as "Last recording failed" — false for a meeting that
+    /// recorded and transcribed just fine.
+    func setOnVideoError(_ callback: (@Sendable (String) -> Void)?) {
+        self.onVideoError = callback
     }
 
     /// Process a recording event through the state machine.
@@ -428,8 +442,8 @@ actor RecordingCoordinator {
             videoContext?.recorder = recorder
             logger.info("Screen capture started for \(meetingId) -> \(url.lastPathComponent)")
         } catch {
-            // VID-04: log, surface, and CONTINUE. Never handle(.recordingFailed(...)) —
-            // that would kill an audio recording that is working fine.
+            // VID-04: log, surface, and CONTINUE. This must never raise the
+            // recording-failed event — that would kill audio capture that is fine.
             logger.error("Screen capture failed to start for \(meetingId): \(error.localizedDescription)")
             surfaceVideoError("Screen recording unavailable — audio is still recording: \(error.localizedDescription)")
             videoContext = nil
@@ -457,11 +471,18 @@ actor RecordingCoordinator {
     /// which is playable per VID-07, and the engine's `stop()` is a safe no-op after a
     /// stream error.
     private func handleVideoStreamStopped(_ error: Error?) {
-        guard var ctx = videoContext else { return }
+        let detail = error?.localizedDescription ?? "stream ended unexpectedly"
+
+        guard var ctx = videoContext else {
+            // No capture in flight: the start already failed (and already surfaced), or
+            // the meeting ended and this is the engine's own teardown notification.
+            // Logged rather than dropped so the sequence stays readable in the log.
+            logger.info("Screen capture stream stopped with no in-flight capture: \(detail)")
+            return
+        }
         ctx.streamDied = true
         videoContext = ctx
 
-        let detail = error?.localizedDescription ?? "stream ended unexpectedly"
         logger.error("Screen capture stream stopped for \(ctx.meetingId): \(detail)")
         surfaceVideoError("Screen recording stopped — audio is still recording (\(detail))")
     }
