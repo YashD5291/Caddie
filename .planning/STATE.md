@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
 status: executing
-stopped_at: "Phase 18 paused at 18-04 human-verify checkpoint — awaiting user hardware checks (real capture, VID-05 exclusion, static duration, kill-9 gate, 14.2 TODO ack). Resume: present results, write 18-04-SUMMARY.md, then phase verification."
-last_updated: "2026-07-09T19:42:15.286Z"
-last_activity: 2026-07-09
+stopped_at: Completed 19-01-PLAN.md
+last_updated: "2026-07-30T19:36:17.129Z"
+last_activity: 2026-07-30
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 9
+  completed_plans: 5
   percent: 25
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-09)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 18 — screen-capture-engine
+**Current focus:** Phase 19 — recording-lifecycle-integration
 
 ## Current Position
 
-Phase: 19
-Plan: Not started
+Phase: 19 (recording-lifecycle-integration) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-07-09
+Last activity: 2026-07-30
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Recent decisions affecting current work:
 - [Phase 18]: 18-02: Live SCStream->AVAssetWriter capture landed; recipe-B first-frame anchor + ~2s static-screen keepalive + async non-blocking finalize; CaptureTarget kept non-Sendable (SCWindow), dims derived from filter.contentRect*pointPixelScale
 - [Phase 18]: 18-03: VID-07 crash-safety gated via a DEBUG launch-arg harness (--screen-record-harness / --validate-mov) reusing the app binary as a kill-able separate process + scripts/kill9-recovery-gate.sh (record→kill -9→assert playable, <=10s loss); live capture leg + 14.2-floor re-run deferred to 18-04 human checkpoint (headless env has no Screen Recording TCC)
 - [Phase 19 Planning 2026-07-10]: Two locked-context reinterpretations, forced by research findings and surfaced to user: (1) per-meeting FACTORY injection (`ScreenRecorderFactory`) instead of a literal single optional instance — research proved the engine is single-use (second start() silently no-ops; meeting #2 would lose video); (2) dedicated `lastVideoError` channel instead of reusing `lastRecordingError` — reuse would render "Last recording failed" for meetings whose audio succeeded. Also: stop-timeout (5s bounded race) shipped per planner judgment; reentrancy task-join guard.
+- [Phase 19]: 19-01: ScreenRecording seam added by retroactive conformance in a NEW file — the hardware-verified Phase 18 engine file keeps a zero diff; feature gate reads object(forKey:) so absent-key can never read as enabled (VID-01 opt-in) — Keeps 18-04's hardware verification valid without a re-run, and makes the opt-in semantic provable by test
 
 ### Pending Todos
 
@@ -91,11 +92,12 @@ Recent decisions affecting current work:
 | Phase 18 P01 | 11 | 3 tasks | 4 files |
 | Phase 18 P02 | 7 | 2 tasks | 1 files |
 | Phase 18 P03 | 18 | 2 tasks | 3 files |
+| Phase 19 P01 | 17 min | 3 tasks | 6 files |
 
 ## Session Continuity
 
-Last session: 2026-07-09T12:52:52.315Z
+Last session: 2026-07-30T19:36:17.121Z
 Last activity: 2026-07-09
-Stopped at: Phase 18 paused at 18-04 human-verify checkpoint — awaiting user hardware checks (real capture, VID-05 exclusion, static duration, kill-9 gate, 14.2 TODO ack). Resume: present results, write 18-04-SUMMARY.md, then phase verification.
+Stopped at: Completed 19-01-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 18`

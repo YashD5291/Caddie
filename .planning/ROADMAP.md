@@ -66,7 +66,7 @@
 
 **Plans**: 5 plans
 
-- [ ] 19-01-PLAN.md — ScreenRecording protocol seam, opt-in settings gate, videoPath, mock/factory test doubles (TDD)
+- [x] 19-01-PLAN.md — ScreenRecording protocol seam, opt-in settings gate, videoPath, mock/factory test doubles (TDD)
 - [ ] 19-02-PLAN.md — Per-meeting video start after audio + anchor pair + non-fatal onVideoError channel (VID-03/VID-04)
 - [ ] 19-03-PLAN.md — Teardown on every path (normal, disconnect, error, app quit) + bounded stop + second-meeting regression
 - [ ] 19-04-PLAN.md — AppState gated construction, lastVideoError surface in the menu bar, README
@@ -113,6 +113,6 @@ Phases execute in numeric order: 18 → 19 → 20 → 21
 | 1–10. Production Hardening | v1.0 | — | ✅ Complete | 2026-03-24 |
 | 11–17. Calendar + Remote Recording | v2.0 | — | ✅ Complete | 2026-07-01 |
 | 18. Screen Capture Engine | v3.0 | 4/4 | Complete    | 2026-07-09 |
-| 19. Recording Lifecycle Integration | v3.0 | 0/TBD | Not started | - |
+| 19. Recording Lifecycle Integration | v3.0 | 1/5 | In Progress|  |
 | 20. Video Storage & Retention | v3.0 | 0/TBD | Not started | - |
 | 21. Settings, Playback & Alignment | v3.0 | 0/TBD | Not started | - |
