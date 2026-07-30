@@ -53,21 +53,42 @@ actor RecordingCoordinator {
 
     // MARK: - In-flight Video State
 
+    /// Single-owner holder for a meeting's capture engine, and the ONLY place the
+    /// coordinator calls into it after the start returns.
+    ///
+    /// Exists for one concrete reason: storing the non-Sendable engine in actor state
+    /// merges it into this actor's isolation region, and region isolation then rejects
+    /// `await engine.stop()` with "sending 'self'-isolated value … to nonisolated
+    /// instance method 'stop()'". Wrapping the engine in a `Sendable` holder that owns
+    /// the call keeps the crossing legal without weakening `ScreenRecording` itself
+    /// (which stays non-Sendable, as the engine's single-owner design requires).
+    ///
+    /// `@unchecked` is sound here because there is exactly one owner: the box is
+    /// created inside the video-start task, handed to `videoContext`, read back only by
+    /// `stopVideo()` (which clears the context in the same synchronous step, so no
+    /// second path can reach it), and everything `stop()` touches is already serialized
+    /// by the engine's own writer queue.
+    private final class CaptureEngineBox: @unchecked Sendable {
+        private let engine: ScreenRecording
+        init(_ engine: ScreenRecording) { self.engine = engine }
+        func stopEngine() async { await engine.stop() }
+    }
+
     /// Video context for the meeting currently being recorded. nil when no video is
     /// in flight (feature off, start failed, or the meeting ended).
     private struct VideoContext {
         let meetingId: String
         let outputURL: URL
-        /// The engine writing this meeting's video.
+        /// The engine writing this meeting's video, boxed so teardown can call it.
         ///
         /// nil ONLY while the start call is still in flight. The context is published
         /// before `start()` so an early first frame has somewhere to land, but the engine
         /// itself cannot be stored that early: under Swift 6 region isolation, writing the
         /// non-Sendable engine into actor state merges it into this actor's region, which
         /// makes the subsequent `await recorder.start(...)` an illegal cross-domain send.
-        /// It is attached the instant start returns, and 19-03's teardown joins
+        /// It is attached the instant start returns, and teardown joins
         /// `videoStartTask` first — so by the time anything needs it, it is non-nil.
-        var recorder: ScreenRecording?
+        var recorder: CaptureEngineBox?
         /// Mach host ticks sampled the instant audio capture started —
         /// the audio half of the STOR-04 anchor pair.
         let audioStartTicks: UInt64
@@ -169,10 +190,19 @@ actor RecordingCoordinator {
     /// the onSamples tee itself before its final drain, so the display-only live
     /// transcriber is left to be torn down by the regular stop/error paths or by
     /// process exit; no tee outlives this call.
-    func stop() {
+    ///
+    /// Video IS finalized here, so quitting mid-meeting does not leave the writer
+    /// open. Honest limitation: `NSApp.terminate` does not await the `Task` that
+    /// AppState.shutdown() wraps this call in, so the finalize may not complete
+    /// before the process dies. That is accepted rather than fixed — blocking quit
+    /// on `finishWriting` is explicitly rejected, and the engine writes a fragmented
+    /// `.mov` (VID-07, hardware-verified in 18-04) which stays playable minus at most
+    /// the last ~10 s.
+    func stop() async {
         if case .recording = state {
             recorder.stop()
         }
+        await stopVideo()
         logger.info("RecordingCoordinator stopped")
     }
 
@@ -188,7 +218,7 @@ actor RecordingCoordinator {
 
     /// Whether a healthy video capture is in flight for the current meeting.
     /// False once SCK reports a stream death, even though the engine's own
-    /// `isRecording` keeps returning true after that (it lies — see 19-RESEARCH).
+    /// still-capturing flag keeps returning true after that (it lies — see 19-RESEARCH).
     var isVideoActive: Bool {
         videoContext.map { !$0.streamDied } ?? false
     }
@@ -439,7 +469,7 @@ actor RecordingCoordinator {
                 await recorder.stop()
                 return
             }
-            videoContext?.recorder = recorder
+            videoContext?.recorder = CaptureEngineBox(recorder)
             logger.info("Screen capture started for \(meetingId) -> \(url.lastPathComponent)")
         } catch {
             // VID-04: log, surface, and CONTINUE. This must never raise the
@@ -465,7 +495,7 @@ actor RecordingCoordinator {
     }
 
     /// Authoritative mid-meeting death signal (window closed, SCK error -3821). The
-    /// engine's own `isRecording` still reports true after this, so never key on it.
+    /// engine's own still-capturing flag still reports true after this, so never key on it.
     ///
     /// The context is deliberately KEPT: teardown must still finalize the partial file,
     /// which is playable per VID-07, and the engine's `stop()` is a safe no-op after a
@@ -487,6 +517,34 @@ actor RecordingCoordinator {
         surfaceVideoError("Screen recording stopped — audio is still recording (\(detail))")
     }
 
+    /// Finalize this meeting's video. Called unconditionally on every teardown path —
+    /// normal stop, meeting end, device disconnect, error teardown, and app quit
+    /// (VID-03 stop half).
+    ///
+    /// Joins the in-flight start task FIRST. `startVideo` deliberately runs the
+    /// ~215 ms ScreenCaptureKit setup (measured in 18-04) off this actor's critical
+    /// path, so a stop can arrive while the start is still in flight. Without the join
+    /// the stop would find no context and no-op, then the start would land afterwards
+    /// and leave a running capture with no owner and no stop path — a `.mov` still
+    /// growing after the meeting ended, which is exactly the "no file left open"
+    /// criterion this phase exists to satisfy.
+    ///
+    /// The stop is never gated on a coordinator-side "video is running" flag, nor on
+    /// `streamDied`. The engine's own state guard is authoritative and idempotent
+    /// (stop-after-error and double-stop are proven safe no-ops in 18-02), whereas a
+    /// coordinator-side flag lies after `didStopWithError`: only the sink transitions
+    /// to `.failed`. A dead stream still owns a partial file that must be finalized.
+    private func stopVideo() async {
+        await videoStartTask?.value
+        videoStartTask = nil
+
+        guard let ctx = videoContext else { return }
+        videoContext = nil
+
+        await ctx.recorder?.stopEngine()
+        logger.info("Screen capture stopped for \(ctx.meetingId) -> \(ctx.outputURL.lastPathComponent) (streamDied=\(ctx.streamDied))")
+    }
+
     /// The single exit for every video failure. Logs and hands the message to the
     /// dedicated non-fatal channel. Never throws, never touches `state`, never calls
     /// `handle` — a degraded recording is still a working recording.
@@ -500,6 +558,7 @@ actor RecordingCoordinator {
         recorder.onSamples = nil             // Detach live tee before stopping capture
         recorder.stop()
         await liveTranscriber?.stop()        // Cancel streaming before batch pipeline (no ANE contention)
+        await stopVideo()                    // Finalize video BEFORE the meeting is handed to the pipeline
 
         let endTime = ISO8601DateFormatter().string(from: Date())
 
@@ -592,6 +651,7 @@ actor RecordingCoordinator {
     private func executeNotifyError(meetingId: String, error: Error) async {
         recorder.onSamples = nil          // Tear down live tee on the error path too
         await liveTranscriber?.stop()
+        await stopVideo()                 // A failed meeting still owns a file that must be finalized
         logger.error("Meeting \(meetingId) ended in error state: \(error.localizedDescription)")
         do {
             try await database.dbWriter.write { dbConn in

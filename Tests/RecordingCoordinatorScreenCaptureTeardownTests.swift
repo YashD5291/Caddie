@@ -71,18 +71,20 @@ final class RecordingCoordinatorScreenCaptureTeardownTests: XCTestCase {
         await startMeeting(coordinator, title: "Manual Stop")
 
         await coordinator.handle(.manualStop)
-        await settle()
 
-        XCTAssertEqual(factory.latest?.stopCallCount, 1,
-                       "A manual stop must finalize the meeting's video exactly once")
-        let active = await coordinator.isVideoActive
-        XCTAssertFalse(active, "No capture may remain in flight after teardown")
-
+        // Read before settling: the mock pipeline finishes in milliseconds, so a sleep
+        // here would race the transcription all the way back to .idle.
         let state = await coordinator.state
         guard case .transcribing = state else {
             XCTFail("Stopping must still hand off to transcription, got \(state)")
             return
         }
+
+        await settle()
+        XCTAssertEqual(factory.latest?.stopCallCount, 1,
+                       "A manual stop must finalize the meeting's video exactly once")
+        let active = await coordinator.isVideoActive
+        XCTAssertFalse(active, "No capture may remain in flight after teardown")
     }
 
     /// `.meetingEnded` reduces to the same `.stopAndTranscribe` side effect, so it
@@ -213,15 +215,16 @@ final class RecordingCoordinatorScreenCaptureTeardownTests: XCTestCase {
         await settle()
 
         await coordinator.handle(.manualStop)
-        await settle()
 
-        XCTAssertEqual(factory.latest?.stopCallCount, 1,
-                       "A dead stream must still be stopped so its partial file is finalized")
         let state = await coordinator.state
         guard case .transcribing = state else {
             XCTFail("A meeting that lost video must still transcribe, got \(state)")
             return
         }
+
+        await settle()
+        XCTAssertEqual(factory.latest?.stopCallCount, 1,
+                       "A dead stream must still be stopped so its partial file is finalized")
     }
 }
 
