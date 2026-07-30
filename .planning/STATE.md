@@ -89,6 +89,7 @@ Recent decisions affecting current work:
 - SCStream sharp edges to handle: first-frame drop (retime session to zero), static-screen duration bug (re-append last frame at stop), window-capture resize behavior, SCK error -3821 stream restarts
 - macOS 15+ monthly screen-recording re-approval nag — needs UX messaging
 - Disk guard (500 MB) must be raised when video is enabled
+- RES-04 deferred: the audio drain DispatchSourceTimer runs on the main queue, so ANY main-thread stall silently discards ring-buffer samples. Finding F1 (19-VALIDATION.md) measured 304 s of meeting yielding 63.2 s of audio. The blocking Stop-confirm modal is gone (quick-260731-5nv), but the underlying fragility remains — any future main-thread modal or long synchronous work reintroduces silent audio loss.
 
 ### Quick Tasks Completed
 
