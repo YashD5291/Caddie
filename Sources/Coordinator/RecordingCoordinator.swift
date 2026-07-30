@@ -74,6 +74,17 @@ actor RecordingCoordinator {
         func stopEngine() async { await engine.stop() }
     }
 
+    /// One-shot latch so a cancellation-aware waiter can observe that a
+    /// fire-and-forget task finished, without awaiting its non-cancellable value.
+    /// Lock-guarded because it is signalled from the stop task and read from a
+    /// task-group child on the generic executor.
+    private final class CompletionLatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _done = false
+        var isDone: Bool { lock.withLock { _done } }
+        func signal() { lock.withLock { _done = true } }
+    }
+
     /// Video context for the meeting currently being recorded. nil when no video is
     /// in flight (feature off, start failed, or the meeting ended).
     private struct VideoContext {
@@ -541,8 +552,64 @@ actor RecordingCoordinator {
         guard let ctx = videoContext else { return }
         videoContext = nil
 
-        await ctx.recorder?.stopEngine()
-        logger.info("Screen capture stopped for \(ctx.meetingId) -> \(ctx.outputURL.lastPathComponent) (streamDied=\(ctx.streamDied))")
+        let timedOut = await stopEngineBounded(ctx.recorder)
+        logger.info("Screen capture stopped for \(ctx.meetingId) -> \(ctx.outputURL.lastPathComponent) (streamDied=\(ctx.streamDied), timedOut=\(timedOut))")
+
+        if timedOut {
+            logger.error("Screen capture stop timed out after \(Self.videoStopTimeout, privacy: .public) for \(ctx.meetingId) — continuing to transcription")
+            surfaceVideoError("Screen recording did not finish cleanly — the video may be incomplete. Audio was saved.")
+        }
+    }
+
+    /// How long teardown waits for the capture engine to finish stopping.
+    ///
+    /// `SCStream.stopCapture()` normally returns in milliseconds, so this bound is
+    /// never reached in practice. It exists because the alternative failure mode is
+    /// unacceptable: a wedged ScreenCaptureKit would stall `executeStopAndTranscribe`
+    /// before `pipeline.enqueue`, leaving a captured meeting stuck in "Processing…"
+    /// forever — a recording that was made but never transcribed. Giving up costs
+    /// nothing: the engine's finalize is already async, keeps running in the
+    /// background after we stop waiting, and its fragmented `.mov` stays playable
+    /// either way (VID-07).
+    private static let videoStopTimeout: Duration = .seconds(5)
+
+    /// Stop the engine, waiting at most `videoStopTimeout`. Returns true if the wait
+    /// timed out.
+    ///
+    /// The stop runs in an unstructured `Task` that is deliberately NEVER cancelled —
+    /// on timeout we stop *waiting*, we do not abort the finalize, so the file still
+    /// gets closed properly in the background.
+    private func stopEngineBounded(_ engine: CaptureEngineBox?) async -> Bool {
+        guard let engine else { return false }
+
+        let latch = CompletionLatch()
+        _ = Task {
+            await engine.stopEngine()
+            latch.signal()
+        }
+
+        return await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                // Deliberately polls the latch instead of awaiting the stop task's
+                // value: a task group waits for ALL of its children before returning,
+                // and `Task<Void, Never>.value` ignores cancellation — so awaiting it
+                // here would make the timeout child useless (the group would still sit
+                // for as long as the wedged stop takes; measured 30 s against a 1 s
+                // timeout). `Task.sleep` IS cancellation-aware, so once the timeout
+                // wins and the group is cancelled this child returns promptly.
+                while !latch.isDone {
+                    do { try await Task.sleep(for: .milliseconds(25)) } catch { break }
+                }
+                return false
+            }
+            group.addTask {
+                try? await Task.sleep(for: Self.videoStopTimeout)
+                return true
+            }
+            let timedOut = await group.next() ?? false
+            group.cancelAll()
+            return timedOut
+        }
     }
 
     /// The single exit for every video failure. Logs and hands the message to the
