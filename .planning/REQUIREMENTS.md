@@ -43,6 +43,7 @@ Deferred to later milestones. Tracked but not in current roadmap.
 - **RES-01**: Recording session crash recovery (audio side)
 - **RES-02**: Automatic transcription retry with exponential backoff
 - **RES-03**: Proactive disk space monitoring during recording
+- **RES-04**: Audio drain pipeline survives main-thread stalls (move the drain DispatchSourceTimer off the main queue / isolate the capture tee) — root-cause hardening for Finding F1 (19-VALIDATION.md); the blocking Stop-confirm modal was removed as the immediate mitigation
 
 ### Intelligence
 

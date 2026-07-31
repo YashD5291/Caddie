@@ -89,6 +89,7 @@ Recent decisions affecting current work:
 - SCStream sharp edges to handle: first-frame drop (retime session to zero), static-screen duration bug (re-append last frame at stop), window-capture resize behavior, SCK error -3821 stream restarts
 - macOS 15+ monthly screen-recording re-approval nag — needs UX messaging
 - Disk guard (500 MB) must be raised when video is enabled
+- RES-04 deferred: the audio drain DispatchSourceTimer runs on the main queue, so ANY main-thread stall silently discards ring-buffer samples. Finding F1 (19-VALIDATION.md) measured 304 s of meeting yielding 63.2 s of audio. The blocking Stop-confirm modal is gone (quick-260731-5nv), but the underlying fragility remains — any future main-thread modal or long synchronous work reintroduces silent audio loss.
 
 ### Quick Tasks Completed
 
@@ -98,6 +99,7 @@ Recent decisions affecting current work:
 | 260610-nnu | Release prep v1.1.0: externalize Google OAuth secret to gitignored file, guard against runtime sortformer download, bump version, commit branch work in 8 atomic chunks (secret-free, tests green) | 2026-06-10 | b2cebbb | [260610-nnu-release-prep-v1-1-0-externalize-oauth-se](./quick/260610-nnu-release-prep-v1-1-0-externalize-oauth-se/) |
 | 260612-15a | Wire Sparkle auto-updates: updater controller + UI, SUFeedURL/SUPublicEDKey, appcast generation/signing/upload in release.sh | 2026-06-12 | f12b109 | [260612-15a-wire-sparkle-auto-updates-updater-contro](./quick/260612-15a-wire-sparkle-auto-updates-updater-contro/) |
 | 260701-xbi | CAL-03: fire the calendar record prompt a configurable lead time before start (default 2 min), now-injectable model helpers + lead-time service selection + 1/2/5-min Settings picker persisted in UserDefaults, README updated | 2026-07-01 | 84b1b3a | [260701-xbi-cal-03-fire-meeting-record-prompt-config](./quick/260701-xbi-cal-03-fire-meeting-record-prompt-config/) |
+| 260731-5nv | F1 lost-audio fix: remove the blocking Stop-confirm modal from the menu bar (NSAlert.runModal blocked the main thread and starved the main-queue audio drain timer, silently dropping ring-buffer samples); drain hardening filed as backlog | 2026-07-31 | d08e329 | [260731-5nv-f1-lost-audio-fix-remove-blocking-stop-c](./quick/260731-5nv-f1-lost-audio-fix-remove-blocking-stop-c/) |
 | Phase 18 P01 | 11 | 3 tasks | 4 files |
 | Phase 18 P02 | 7 | 2 tasks | 1 files |
 | Phase 18 P03 | 18 | 2 tasks | 3 files |

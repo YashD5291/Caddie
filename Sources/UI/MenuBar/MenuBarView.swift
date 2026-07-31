@@ -48,8 +48,12 @@ struct MenuBarView: View {
             videoErrorRow
             Text("\u{1F534} \(appState.currentMeetingTitle ?? "Recording...")")
             Text("Recording \u{00B7} \(Formatters.duration(seconds: Int(appState.recordingDuration)))")
+            // Deliberately no confirmation dialog: a modal here blocks the main thread,
+            // starving the main-queue audio drain timer so ring-buffer samples are silently
+            // dropped (Finding F1, 19-VALIDATION.md). Stopping is non-destructive — the
+            // meeting is saved and transcribed — so the guard is not worth the data loss.
             Button {
-                confirmStopRecording()
+                appState.stopRecording()
             } label: {
                 Label("Stop Recording", systemImage: "stop.circle.fill")
             }
@@ -102,22 +106,6 @@ struct MenuBarView: View {
     }
 
     // MARK: - Helpers
-
-    private func confirmStopRecording() {
-        let title = appState.currentMeetingTitle ?? "this meeting"
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-            let alert = NSAlert()
-            alert.messageText = "Stop Recording?"
-            alert.informativeText = "This will stop recording '\(title)'."
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Stop")
-            alert.addButton(withTitle: "Cancel")
-            if alert.runModal() == .alertFirstButtonReturn {
-                appState.stopRecording()
-            }
-        }
-    }
 
     private func pipelineStepLabel(_ step: PipelineStep) -> String {
         switch step {
