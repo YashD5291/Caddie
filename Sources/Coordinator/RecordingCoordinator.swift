@@ -118,6 +118,8 @@ actor RecordingCoordinator {
         /// the audio half of the STOR-04 anchor pair.
         let audioStartTicks: UInt64
         /// Host ticks of the first written video frame, from `onFirstFrameHostTime`.
+        /// Test-only state: its one reader is the DEBUG `videoAnchorPair`. The persisted
+        /// offset comes from the funnel's own copy, so release builds never read this.
         var firstFrameTicks: UInt64?
         /// Set when SCK reports the stream died mid-meeting. The context is deliberately
         /// KEPT so teardown still finalizes the partial (playable) file.
