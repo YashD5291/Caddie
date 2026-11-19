@@ -19,7 +19,7 @@ Requirements for optional screen video capture during meeting recordings. Each m
 
 ### Storage
 
-- [ ] **STOR-01**: Video is stored locally alongside the meeting's audio and linked to the meeting record (nullable `video_file` column; never in FTS5)
+- [x] **STOR-01**: Video is stored locally alongside the meeting's audio and linked to the meeting record (nullable `video_file` column; never in FTS5)
 - [x] **STOR-02**: Deleting a meeting deletes its video file along with its audio
 - [x] **STOR-03**: Recording is blocked pre-start when disk space is insufficient for video (disk guard raised above the current 500 MB when video is enabled)
 - [x] **STOR-04**: Video/audio timeline alignment metadata (host-clock anchor) is persisted with the meeting so playback position maps to transcript time
@@ -82,7 +82,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STOR-04 | Phase 18 | Complete |
 | VID-03 | Phase 19 | Complete |
 | VID-04 | Phase 19 | Complete |
-| STOR-01 | Phase 20 | Pending |
+| STOR-01 | Phase 20 | Complete |
 | STOR-02 | Phase 20 | Complete |
 | STOR-03 | Phase 20 | Complete |
 | VID-01 | Phase 21 | Pending |

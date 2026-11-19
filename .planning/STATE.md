@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
 status: executing
-stopped_at: Completed 20-05-PLAN.md
-last_updated: "2026-11-19T14:03:40.160Z"
+stopped_at: Completed 20-06-PLAN.md
+last_updated: "2026-11-19T14:28:31.037Z"
 last_activity: 2026-11-19
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 17
-  completed_plans: 14
+  completed_plans: 15
   percent: 50
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 20 (Video Storage & Retention) — EXECUTING
-Plan: 6 of 8
+Plan: 7 of 8
 Status: Ready to execute
 Last activity: 2026-11-19
 
@@ -87,6 +87,8 @@ Recent decisions affecting current work:
 - [Phase 20]: 20-04: MockScreenRecorder.stop() finalizes only after a successful start, mirroring the engine's stop() no-op without a running writer, so a 20-06 test can never pass on a finalize that production would not deliver
 - [Phase 20]: 20-05: The D-01 tier decision lives in the coordinator precondition (evaluateDiskSpace in executeStartRecording): one capacity read decides both tiers, and the video tier is gated on screenRecorderFactory != nil, the same inert-by-absence gate as startVideo
 - [Phase 20]: 20-05: The low-disk skip runs at the startVideo call site after audio has started, so the message lands after .recording; it never calls handle(.recordingFailed) and never touches state
+- [Phase 20]: 20-06: Link early, verify on finalize through one AsyncStream per meeting; the consumer Task is unstructured and never awaited by teardown, so pipeline.enqueue never waits on finalize or inspection
+- [Phase 20]: 20-06: Finalize handlers take the captured meetingId/url and never read videoContext (a temporary mutation that keyed on videoContext failed the meeting #2 test); D-07 discards are logged, never surfaced, since a late finalize can land during a later meeting
 
 ### Pending Todos
 
@@ -122,11 +124,12 @@ Recent decisions affecting current work:
 | Phase 20 P03 | 6 min | 2 tasks | 3 files |
 | Phase 20 P04 | 8 min | 2 tasks | 5 files |
 | Phase 20 P05 | 9 min | 2 tasks | 3 files |
+| Phase 20 P06 | 16 min | 2 tasks | 2 files |
 
 ## Session Continuity
 
-Last session: 2026-11-19T14:03:40.153Z
+Last session: 2026-11-19T14:28:31.028Z
 Last activity: 2026-07-09
-Stopped at: Completed 20-05-PLAN.md
+Stopped at: Completed 20-06-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 18`
