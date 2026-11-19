@@ -298,7 +298,45 @@ actor RecordingCoordinator {
 
     // MARK: - Precondition Checks
 
-    private static let minimumDiskSpaceBytes: Int64 = 500 * 1024 * 1024  // 500 MB
+    /// Outcome of the pre-start disk guard (STOR-03, reinterpreted by D-01).
+    ///
+    /// Only `.belowAudioFloor` blocks the recording. `.belowVideoThreshold` records
+    /// audio only: video is skipped and the reason goes to the non-fatal video channel,
+    /// because video headroom must never cost a meeting its audio.
+    enum DiskSpaceTier: Equatable, Sendable {
+        case belowAudioFloor
+        case belowVideoThreshold
+        case sufficient
+    }
+
+    static let minimumDiskSpaceBytes: Int64 = 500 * 1024 * 1024  // 500 MB audio floor
+
+    /// D-02: video headroom covers about 2 h of video at the active preset's bitrate cap.
+    static let videoHeadroomSeconds: Int64 = 2 * 60 * 60
+
+    /// Free space needed before video may start: the audio floor plus `videoHeadroomSeconds`
+    /// of video at the preset's bitrate cap (D-02).
+    static func videoDiskThreshold(for preset: ScreenRecorder.QualityPreset) -> Int64 {
+        // Multiply in Int64 before dividing by 8 so no bits are truncated (Pitfall 7).
+        minimumDiskSpaceBytes + Int64(preset.bitrate) * videoHeadroomSeconds / 8
+    }
+
+    /// Pure two-tier decision over one capacity snapshot (D-01). A `nil` preset means
+    /// screen recording is off, so only the audio floor applies (D-03).
+    static func diskSpaceTier(available: Int64, videoPreset: ScreenRecorder.QualityPreset?) -> DiskSpaceTier {
+        guard available >= minimumDiskSpaceBytes else { return .belowAudioFloor }
+        guard let videoPreset else { return .sufficient }
+        return available >= videoDiskThreshold(for: videoPreset) ? .sufficient : .belowVideoThreshold
+    }
+
+    /// Copy for the low-disk video skip. It reads after the menu bar's existing
+    /// "Screen recording stopped — audio was saved:" prefix; changing that prefix
+    /// belongs to Phase 21.
+    static func lowDiskVideoMessage(availableBytes: Int64, requiredBytes: Int64) -> String {
+        let free = ByteCountFormatter.string(fromByteCount: availableBytes, countStyle: .file)
+        let needed = ByteCountFormatter.string(fromByteCount: requiredBytes, countStyle: .file)
+        return "Not enough free disk space for video (\(free) free, \(needed) needed) — this meeting is recording audio only"
+    }
 
     private func checkDiskSpace() throws {
         let resourceValues = try AudioFileManager.audioDirectory.resourceValues(
