@@ -81,6 +81,59 @@ Filled in by the planner (2026-11-19). Requirement → test mapping, keyed to pl
 
 ---
 
+## Manual Gate Results
+
+Plan 20-08 hardware gate. Pre-state captured 2026-11-19 at 20:09–20:13 IST (Task 1), before the gate's first app launch.
+
+### Gate prep (20-08 Task 1)
+
+| Item | Measured value |
+|------|----------------|
+| `make test` | `** TEST SUCCEEDED **`: 426 tests, 0 failures (41.3 s test time) |
+| `make build` | `** BUILD SUCCEEDED **` |
+| App path | `/Users/yashdesai/Library/Developer/Xcode/DerivedData/Caddie-gaujkvsybzcmwgepbihhspvvoeyo/Build/Products/Debug/Caddie.app` |
+| Bundle id / signing | `com.caddie.app`, TeamIdentifier `WBUPX3432S` |
+| DB backup (plan step 2, after `make test`) | `/private/tmp/claude-501/-Users-yashdesai-Codebase-Fun-Caddie/bf261333-25c1-4294-950d-fba816e2e076/scratchpad/caddie-db-backup-20261119-201211/`: `caddie.db` 2,793,472 B, `caddie.db-wal` 1,540,912 B, `caddie.db-shm` 32,768 B. Sizes and SHA-256 match the originals; `PRAGMA integrity_check` on the copy = `ok`, 17 meetings |
+| Extra DB backup (before `make test`) | `/private/tmp/claude-501/-Users-yashdesai-Codebase-Fun-Caddie/bf261333-25c1-4294-950d-fba816e2e076/scratchpad/caddie-db-backup-pre-maketest-20261119-200918/`: same three sizes and SHA-256 match (the test run did not change the DB) |
+| `screenRecordingEnabled` | `defaults read com.caddie.app screenRecordingEnabled` → `1` |
+| Screen Recording TCC for the Debug build | unknown: both TCC.db files deny reads without Full Disk Access. 19-05's `tccutil reset ScreenCapture` revoked the grant, so assume a re-grant is needed (Task 2 check 0) |
+| Log stream | started by the orchestrator for Task 2 (not part of Task 1) |
+
+### Pre-state (read with `sqlite3 -readonly`)
+
+| Query | Result |
+|-------|--------|
+| `SELECT identifier FROM grdb_migrations` | `v1_create_meetings`, `v2_add_video_columns` (already at v2; see finding P-1) |
+| `SELECT count(*) FROM meetings` | 17 |
+| `pragma_table_info('meetings')` column count | 15 |
+| rows with `video_file` or `video_start_offset` NOT NULL | 0 |
+
+Pre-existing `.mov` files in `~/Library/Application Support/Caddie/audio/`, each checked for a row:
+
+| File | Size (bytes) | mtime | Row (`meeting_id`, `status`) | `video_file` / `video_start_offset` |
+|------|--------------|-------|------------------------------|-------------------------------------|
+| `24204cea-ff5.mov` | 6,497,721 | Jul 31 02:09 | `24204cea-ff5`, `recording` | NULL / NULL |
+| `68d4c389-96d.mov` | 5,273,362 | Jul 31 02:08 | `68d4c389-96d`, `done` | NULL / NULL |
+| `884dbf89-a39.mov` | 94,581,489 | Jul 31 02:06 | `884dbf89-a39`, `done` | NULL / NULL |
+
+**Finding P-1: the real DB was already migrated before the gate.** The test bundle is hosted in `Caddie.app`. Under XCTest, the menu-bar label auto-opens the main window, and `ContentView.task` then runs `AppState.initialize()` against the real `caddie.db`. That open migrated the real library to v2 during 20-01's test runs: the `caddie.db-wal` mtime is 18:35, which matches the 20-01 migration commits. Since 20-02, every test run has also run the orphan `.mov` sweep on the real `audio/` directory. All 3 real `.mov` files have rows and survived. Check 1 therefore cannot observe the migration live. It can still verify the result: v2 present, 17 meetings, 15 columns, all pre-existing `video_file` NULL, search works. Logged as D-1 in `deferred-items.md`, together with D-2: the tests leave 1791 row-less `.wav`/`.m4a` stems in the real `audio/` directory.
+
+### Checks (20-08 Task 2)
+
+| # | Check | Requirement | Measured value |
+|---|-------|-------------|----------------|
+| 0 | Screen Recording TCC re-grant | — | pending (Task 2) |
+| 1 | Migration on real data | STOR-01 / D-04 | pending (Task 2) |
+| 2 | Launch sweep kept real videos | D-10 / D-14 | pending (Task 2) |
+| 3 | Real capture links the row (`video_file`, `video_start_offset`) | STOR-01 / D-05 / D-08 | pending (Task 2) |
+| 4 | Quit mid-recording keeps the partial linked | D-06 | pending (Task 2) |
+| 5 | Delete removes `.mov` + `.m4a` | STOR-02 / D-09 | pending (Task 2) |
+| 6 | Planted orphan swept | D-10 | pending (Task 2) |
+| 7 | Kill-9 crash-safety gate | D-13 / VID-07 | pending (Task 2) |
+| 8 | Low-disk tier | STOR-03 | pending (Task 2) |
+
+---
+
 ## Validation Sign-Off
 
 - [ ] All tasks have `<automated>` verify or Wave 0 dependencies
