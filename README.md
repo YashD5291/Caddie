@@ -62,7 +62,8 @@ Caddie can also capture the meeting as video while it records audio. This is off
 
 - **There is no Settings toggle yet** — that arrives in a later release. To try it today, quit Caddie, run `defaults write com.caddie.app screenRecordingEnabled -bool true`, and relaunch. Turn it back off with `defaults write com.caddie.app screenRecordingEnabled -bool false`.
 - **Where the video goes.** Video is written next to the audio as `<meetingId>.mov` in `~/Library/Application Support/Caddie/audio/`.
-- **Known gaps.** Deleting a meeting does not yet remove its `.mov`, so the video file is left behind — clean it up by hand for now. The pre-recording disk-space guard also has not been raised to account for video (roughly 0.5–1.3 GB/hour). Both are being fixed next.
+- **Deleting a meeting deletes its video.** Removing a meeting from the library also removes its `.mov`, along with the audio. If a video is ever left without a meeting (for example, after a crash), Caddie deletes it the next time it launches. Caddie never does this when it can't read its database, or when the database is empty.
+- **Low disk space records audio only.** Recording is still blocked below 500 MB free, as before. With screen recording on, Caddie also wants room for about two hours of video (about 2.8 GB at the default quality). With less than that, the meeting records audio only and the menu bar says why.
 - **Audio always wins.** If screen capture fails or the Screen Recording permission is denied, the meeting still records and transcribes audio normally — you just get an orange warning in the menu bar telling you the video stopped and the audio was saved.
 
 ## Architecture
