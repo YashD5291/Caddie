@@ -88,7 +88,7 @@
 
 - [x] 20-01-PLAN.md — v2 migration (`video_file`, `video_start_offset`) + `Meeting` fields; FTS isolation and upgrade tests (TDD)
 - [x] 20-02-PLAN.md — `deleteMedia` (wav/m4a/mov by id) + list-then-read launch orphan sweep with DB-error / empty-set guards (TDD)
-- [ ] 20-03-PLAN.md — `VideoFileInspecting` contract + AVFoundation inspector + mock; synthetic-fixture tests (TDD)
+- [x] 20-03-PLAN.md — `VideoFileInspecting` contract + AVFoundation inspector + mock; synthetic-fixture tests (TDD)
 - [ ] 20-04-PLAN.md — Additive engine `onFinalized` (exactly once, after `finishWriting`) + seam + mock knobs (TDD)
 - [ ] 20-05-PLAN.md — Two-tier disk guard (block < 500 MB; audio-only below preset video threshold) + capacity seam (TDD)
 - [ ] 20-06-PLAN.md — Per-meeting event funnel: link on first frame, verify/discard on finalize, every finalize path (TDD)
@@ -123,5 +123,5 @@ Phases execute in numeric order: 18 → 19 → 20 → 21
 | 11–17. Calendar + Remote Recording | v2.0 | — | ✅ Complete | 2026-07-01 |
 | 18. Screen Capture Engine | v3.0 | 4/4 | Complete    | 2026-07-09 |
 | 19. Recording Lifecycle Integration | v3.0 | 5/5 | Complete    | 2026-07-30 |
-| 20. Video Storage & Retention | v3.0 | 2/8 | In Progress|  |
+| 20. Video Storage & Retention | v3.0 | 3/8 | In Progress|  |
 | 21. Settings, Playback & Alignment | v3.0 | 0/TBD | Not started | - |
