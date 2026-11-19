@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
 status: executing
-stopped_at: Phase 20 context gathered
-last_updated: "2026-11-19T13:00:04.520Z"
-last_activity: 2026-11-19 -- Phase 20 planning complete
+stopped_at: Completed 20-01-PLAN.md
+last_updated: "2026-11-19T13:12:29.853Z"
+last_activity: 2026-11-19
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 17
-  completed_plans: 9
+  completed_plans: 10
   percent: 50
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-09)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 19 — recording-lifecycle-integration
+**Current focus:** Phase 20 — Video Storage & Retention
 
 ## Current Position
 
-Phase: 20
-Plan: Not started
+Phase: 20 (Video Storage & Retention) — EXECUTING
+Plan: 2 of 8
 Status: Ready to execute
-Last activity: 2026-11-19 -- Phase 20 planning complete
+Last activity: 2026-11-19
 
 ## Performance Metrics
 
@@ -77,6 +77,8 @@ Recent decisions affecting current work:
 - [Phase 19]: 19-04: Screen recording is inert by ABSENCE, not by flag — the ScreenRecorderFactory is constructed only inside the ScreenRecordingSettings.isEnabled branch, so no downstream path re-checks the gate
 - [Phase 19]: 19-04: Permissions.screenRecording is logged for diagnostics but never gates construction — it is a window-name inference, so a false negative would silently disable video; a denied TCC grant is handled as a real start() throw on the non-fatal channel
 - [Phase 19]: 19-04: The video warning renders in the .recording menu-bar branch too (not just .idle) — a capture that dies mid-meeting would otherwise be invisible for the rest of the meeting
+- [Phase 20]: 20-01: Video anchor persisted as a single video_start_offset DOUBLE (seconds, first video frame minus audio start; video time = transcript time - offset); raw host ticks not stored
+- [Phase 20]: 20-01: v2_add_video_columns is ADD COLUMN only; v1, meetings_fts and its triggers untouched, so video_file is never indexed (proven by negative search + exact FTS column-list test)
 
 ### Pending Todos
 
@@ -107,11 +109,12 @@ Recent decisions affecting current work:
 | Phase 19 P02 | 13 min | 2 tasks | 2 files |
 | Phase 19 P03 | 16 min | 2 tasks | 2 files |
 | Phase 19 P04 | 12 min | 2 tasks | 4 files |
+| Phase 20 P01 | 7 min | 2 tasks | 4 files |
 
 ## Session Continuity
 
-Last session: 2026-11-19T11:31:27.283Z
+Last session: 2026-11-19T13:12:29.846Z
 Last activity: 2026-07-09
-Stopped at: Phase 20 context gathered
-Resume file: .planning/phases/20-video-storage-retention/20-CONTEXT.md
+Stopped at: Completed 20-01-PLAN.md
+Resume file: None
 Next: `/gsd:plan-phase 18`
