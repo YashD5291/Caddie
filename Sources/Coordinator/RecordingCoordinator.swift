@@ -107,20 +107,13 @@ actor RecordingCoordinator {
         /// The engine writing this meeting's video, boxed so teardown can call it.
         ///
         /// nil ONLY while the start call is still in flight. The context is published
-        /// before `start()` so an early first frame has somewhere to land, but the engine
-        /// itself cannot be stored that early: under Swift 6 region isolation, writing the
+        /// before `start()` (see `startVideoInner`), but the engine itself cannot be
+        /// stored that early: under Swift 6 region isolation, writing the
         /// non-Sendable engine into actor state merges it into this actor's region, which
         /// makes the subsequent `await recorder.start(...)` an illegal cross-domain send.
         /// It is attached the instant start returns, and teardown joins
         /// `videoStartTask` first — so by the time anything needs it, it is non-nil.
         var recorder: CaptureEngineBox?
-        /// Mach host ticks sampled the instant audio capture started —
-        /// the audio half of the STOR-04 anchor pair.
-        let audioStartTicks: UInt64
-        /// Host ticks of the first written video frame, from `onFirstFrameHostTime`.
-        /// Test-only state: its one reader is the DEBUG `videoAnchorPair`. The persisted
-        /// offset comes from the funnel's own copy, so release builds never read this.
-        var firstFrameTicks: UInt64?
         /// Set when SCK reports the stream died mid-meeting. The context is deliberately
         /// KEPT so teardown still finalizes the partial (playable) file.
         var streamDied: Bool = false
@@ -262,12 +255,6 @@ actor RecordingCoordinator {
     /// still-capturing flag keeps returning true after that (it lies — see 19-RESEARCH).
     var isVideoActive: Bool {
         videoContext.map { !$0.streamDied } ?? false
-    }
-
-    /// The STOR-04 anchor pair for the in-flight meeting: audio-start host ticks and
-    /// (once the first frame is written) the first-frame host ticks.
-    var videoAnchorPair: (audio: UInt64, firstFrame: UInt64?)? {
-        videoContext.map { ($0.audioStartTicks, $0.firstFrameTicks) }
     }
 
     /// The `.mov` URL the in-flight capture is writing to.
@@ -582,13 +569,12 @@ actor RecordingCoordinator {
                                              audioStartTicks: audioStartTicks, events: events)
         }
 
-        // Publish the context BEFORE starting, so a first frame delivered during the
-        // start call still finds somewhere to record its anchor.
+        // Publish the context BEFORE starting, so a stream death reported during the
+        // start call still finds the in-flight capture.
         videoContext = VideoContext(
             meetingId: meetingId,
             outputURL: url,
-            recorder: nil,
-            audioStartTicks: audioStartTicks
+            recorder: nil
         )
 
         do {
@@ -636,15 +622,6 @@ actor RecordingCoordinator {
         return timebase
     }
 
-    /// Video half of the STOR-04 anchor pair, kept in memory for the in-flight meeting
-    /// (the DEBUG `videoAnchorPair`) and logged. The funnel persists the offset to the row.
-    private func recordFirstFrameAnchor(meetingId: String, ticks: UInt64, offset: Double) {
-        guard var ctx = videoContext, ctx.meetingId == meetingId else { return }
-        ctx.firstFrameTicks = ticks
-        videoContext = ctx
-        logger.info("Video anchor for \(meetingId): audioTicks=\(ctx.audioStartTicks) firstFrameTicks=\(ticks) offset=\(offset, format: .fixed(precision: 3))s")
-    }
-
     /// Consumes one meeting's video events in order: link on the first frame, verify on
     /// finalize (D-05 as amended). Ends when the engine finalizes or the start fails.
     ///
@@ -662,7 +639,7 @@ actor RecordingCoordinator {
                                                              firstFrameTicks: ticks,
                                                              timebase: Self.hostTimebase())
                 offset = firstFrameOffset
-                recordFirstFrameAnchor(meetingId: meetingId, ticks: ticks, offset: firstFrameOffset)
+                logger.info("Video anchor for \(meetingId): audioTicks=\(audioStartTicks) firstFrameTicks=\(ticks) offset=\(firstFrameOffset, format: .fixed(precision: 3))s")
                 linked = await linkVideo(meetingId: meetingId, fileName: url.lastPathComponent,
                                          offset: firstFrameOffset)
             case .finalized:

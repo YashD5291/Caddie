@@ -4,7 +4,7 @@ import GRDB
 
 /// Verifies RecordingCoordinator wires screen capture into the recording lifecycle:
 /// a fresh engine per meeting, started only AFTER audio, writing to the meeting's
-/// canonical `.mov`, with the STOR-04 anchor pair held in memory (VID-03 start half).
+/// canonical `.mov` (VID-03 start half).
 ///
 /// Every recorder is a `MockScreenRecorder` vended by `MockScreenRecorderFactory`, so
 /// these tests need no TCC grant and never capture the developer's screen. Audio is a
@@ -139,23 +139,6 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
         XCTAssertEqual(factory.makeCallCount, 0, "No engine may be vended when the feature is off")
         let active = await coordinator.isVideoActive
         XCTAssertFalse(active, "Video must be inactive when no factory is injected")
-    }
-
-    /// STOR-04 (in-memory leg): both halves of the anchor pair are held for the
-    /// in-flight meeting — the audio-start host tick and the first-frame host tick.
-    /// The first-frame half also proves the callbacks were assigned BEFORE start().
-    func testAnchorPairCapturedInMemory() async {
-        let coordinator = makeCoordinator()
-        await coordinator.handle(.manualStart(title: "Anchor Test"))
-        await settle()
-
-        guard let pair = await coordinator.videoAnchorPair else {
-            XCTFail("Expected an anchor pair for the in-flight meeting")
-            return
-        }
-        XCTAssertGreaterThan(pair.audio, 0, "Audio-start host ticks must be recorded")
-        XCTAssertNotNil(pair.firstFrame,
-                        "First-frame ticks must arrive — proves onFirstFrameHostTime was set before start()")
     }
 
     /// While a meeting records with a healthy stream, video reports active.
