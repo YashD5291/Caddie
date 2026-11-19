@@ -26,13 +26,13 @@ enum AudioFileManager {
     }
 
     /// Returns the WAV file path for a given meeting ID.
-    static func wavPath(for meetingId: String) -> URL {
-        audioDirectory.appendingPathComponent("\(meetingId).wav")
+    static func wavPath(for meetingId: String, in directory: URL = audioDirectory) -> URL {
+        directory.appendingPathComponent("\(meetingId).wav")
     }
 
     /// Returns the ALAC (.m4a) file path for a given meeting ID.
-    static func alacPath(for meetingId: String) -> URL {
-        audioDirectory.appendingPathComponent("\(meetingId).m4a")
+    static func alacPath(for meetingId: String, in directory: URL = audioDirectory) -> URL {
+        directory.appendingPathComponent("\(meetingId).m4a")
     }
 
     /// Returns the video (.mov) file path for a given meeting ID.
@@ -261,8 +261,13 @@ enum AudioFileManager {
             logger.error("Refusing to delete media for unsafe meeting id")
             return
         }
-        for ext in ["wav", "m4a", "mov"] {
-            removeFileIfPresent(at: directory.appendingPathComponent("\(meetingId).\(ext)"))
+        let mediaFiles = [
+            wavPath(for: meetingId, in: directory),
+            alacPath(for: meetingId, in: directory),
+            videoPath(for: meetingId, in: directory),
+        ]
+        for url in mediaFiles {
+            removeFileIfPresent(at: url)
         }
     }
 
@@ -399,8 +404,8 @@ enum AudioFileManager {
 
     /// True when the meeting's `.m4a` or `.wav` is still in `directory`.
     private static func hasSiblingAudio(stem: String, in directory: URL) -> Bool {
-        ["m4a", "wav"].contains { ext in
-            FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(stem).\(ext)").path)
+        [alacPath(for: stem, in: directory), wavPath(for: stem, in: directory)].contains { url in
+            FileManager.default.fileExists(atPath: url.path)
         }
     }
 
