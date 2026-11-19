@@ -353,9 +353,15 @@ actor RecordingCoordinator {
         return available >= videoDiskThreshold(for: videoPreset) ? .sufficient : .belowVideoThreshold
     }
 
-    /// Copy for the low-disk video skip. It reads after the menu bar's existing
-    /// "Screen recording stopped — audio was saved:" prefix; changing that prefix
-    /// belongs to Phase 21.
+    /// Menu bar headline for a capture that failed or stopped once the meeting began.
+    static let videoStoppedHeadline = "Screen recording stopped \u{2014} audio was saved"
+
+    /// Neutral menu bar headline for the low-disk skip (D-01): video never started and the
+    /// meeting is still recording, so "stopped" and "audio was saved" would both be wrong.
+    /// The full warning UX belongs to Phase 21.
+    static let videoSkippedHeadline = "Screen recording"
+
+    /// Copy for the low-disk video skip, surfaced under `videoSkippedHeadline`.
     static func lowDiskVideoMessage(availableBytes: Int64, requiredBytes: Int64) -> String {
         let free = ByteCountFormatter.string(fromByteCount: availableBytes, countStyle: .file)
         let needed = ByteCountFormatter.string(fromByteCount: requiredBytes, countStyle: .file)
@@ -533,7 +539,8 @@ actor RecordingCoordinator {
     private func skipVideoForLowDisk(meetingId: String, availableBytes: Int64) {
         let requiredBytes = Self.videoDiskThreshold(for: Self.videoPreset)
         logger.warning("Skipping screen capture for \(meetingId): \(availableBytes) bytes free, \(requiredBytes) needed for video")
-        surfaceVideoError(Self.lowDiskVideoMessage(availableBytes: availableBytes, requiredBytes: requiredBytes))
+        surfaceVideoError(Self.lowDiskVideoMessage(availableBytes: availableBytes, requiredBytes: requiredBytes),
+                          headline: Self.videoSkippedHeadline)
     }
 
     private func startVideoInner(meetingId: String, audioStartTicks: UInt64) async {
@@ -878,12 +885,14 @@ actor RecordingCoordinator {
         }
     }
 
-    /// The single exit for every video failure. Logs and hands the message to the
-    /// dedicated non-fatal channel. Never throws, never touches `state`, never calls
-    /// `handle` — a degraded recording is still a working recording.
-    private func surfaceVideoError(_ message: String) {
-        logger.error("Video error surfaced: \(message)")
-        onVideoError?(message)
+    /// The single exit for every video failure. Logs and hands the full menu bar line,
+    /// headline included, to the dedicated non-fatal channel. Never throws, never touches
+    /// `state`, never calls `handle` — a degraded recording is still a working recording.
+    private func surfaceVideoError(_ message: String,
+                                   headline: String = RecordingCoordinator.videoStoppedHeadline) {
+        let line = "\(headline): \(message)"
+        logger.error("Video error surfaced: \(line)")
+        onVideoError?(line)
     }
 
     private func executeStopAndTranscribe(meetingId: String) async {

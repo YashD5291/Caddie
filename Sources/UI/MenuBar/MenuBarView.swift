@@ -69,10 +69,12 @@ struct MenuBarView: View {
     /// branches: a degraded capture matters most while the meeting is still running,
     /// which is exactly when the idle-only error row is invisible. Orange, not red, and
     /// explicit that the audio survived — this is a degradation, not a failed recording.
+    /// The coordinator supplies the whole line, headline included, because only it knows
+    /// whether video stopped mid-meeting or was skipped before it started.
     @ViewBuilder
     private var videoErrorRow: some View {
         if let videoError = appState.lastVideoError {
-            Text("\u{26A0}\u{FE0F} Screen recording stopped \u{2014} audio was saved: \(videoError)")
+            Text("\u{26A0}\u{FE0F} \(videoError)")
                 .foregroundStyle(.orange)
             Button("Dismiss Video Warning") {
                 appState.clearVideoError()

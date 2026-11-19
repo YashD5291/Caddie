@@ -19,6 +19,9 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
     var factory: MockScreenRecorderFactory!
     var videoDir: URL!
 
+    /// The menu bar headline for a capture that failed or stopped once the meeting began.
+    private static let stoppedHeadline = "Screen recording stopped \u{2014} audio was saved: "
+
     override func setUpWithError() throws {
         db = try AppDatabase(inMemory: true)
         pipeline = TranscriptionPipeline(asr: MockASREngine(), diarization: MockDiarizationEngine())
@@ -191,6 +194,8 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
         XCTAssertEqual(collector.messages.count, 1, "The failure must be surfaced exactly once")
         XCTAssertTrue(collector.messages.first?.contains("TCC denied") == true,
                       "Surfaced copy must carry the underlying error, got: \(collector.messages)")
+        XCTAssertTrue(collector.messages.first?.hasPrefix(Self.stoppedHeadline) == true,
+                      "The menu bar line keeps its existing headline, got: \(collector.messages)")
         let active = await coordinator.isVideoActive
         XCTAssertFalse(active, "Video must be inactive after a start failure")
     }
@@ -228,6 +233,8 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
         XCTAssertEqual(collector.messages.count, 1, "Stream death must be surfaced exactly once")
         XCTAssertTrue(collector.messages.first?.contains("-3821") == true,
                       "Surfaced copy must carry the SCK detail, got: \(collector.messages)")
+        XCTAssertTrue(collector.messages.first?.hasPrefix(Self.stoppedHeadline) == true,
+                      "The menu bar line keeps its existing headline, got: \(collector.messages)")
 
         let state = await coordinator.state
         guard case .recording = state else {

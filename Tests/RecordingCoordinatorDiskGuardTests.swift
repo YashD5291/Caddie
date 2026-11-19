@@ -192,6 +192,22 @@ final class RecordingCoordinatorDiskGuardTests: XCTestCase {
                       "The message must name the reason, got: \(log.videoMessages)")
     }
 
+    /// IN-01: video never started and the meeting is still recording, so the menu bar
+    /// line for the skip must not claim that screen recording stopped.
+    func testLowDiskMessageUsesNeutralHeadline() async {
+        let log = DiskGuardEventLog()
+        let coordinator = makeCoordinator(capacity: { Self.oneGB }, withVideo: true)
+        await attach(log, to: coordinator)
+
+        await coordinator.handle(.manualStart(title: "Neutral Headline"))
+        await settle()
+
+        let message = log.videoMessages.first ?? ""
+        XCTAssertTrue(message.hasPrefix("Screen recording: "), "Expected the neutral headline, got: \(message)")
+        XCTAssertFalse(message.contains("stopped"), "Video never started, got: \(message)")
+        XCTAssertFalse(message.contains("audio was saved"), "The meeting is still recording, got: \(message)")
+    }
+
     func testAtVideoThresholdStartsVideo() async {
         let threshold = RecordingCoordinator.videoDiskThreshold(for: .default)
         let log = DiskGuardEventLog()
