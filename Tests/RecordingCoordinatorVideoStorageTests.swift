@@ -245,6 +245,38 @@ final class RecordingCoordinatorVideoStorageTests: XCTestCase {
         XCTAssertTrue(fileExists(videoURL(id)), "An inconclusive probe must keep the file")
     }
 
+    /// IN-03: an unusable video is unlinked before it is deleted. If the unlink fails, the
+    /// file is kept: a link to a missing file is worse than an unusable file on disk.
+    func testFailedUnlinkKeepsUnusableVideoFile() async throws {
+        factory.createsFileOnStart = true
+        inspector.defaultResult = .unreadable("AVFoundationErrorDomain -11829: Cannot Open")
+        try await db.dbWriter.write { dbConn in
+            try dbConn.execute(sql: """
+                CREATE TRIGGER test_block_video_unlink
+                BEFORE UPDATE OF video_file ON meetings
+                WHEN NEW.video_file IS NULL AND OLD.video_file IS NOT NULL
+                BEGIN SELECT RAISE(ABORT, 'video unlink blocked by test'); END
+                """)
+        }
+        let coordinator = makeCoordinator()
+        guard let id = await startMeeting(coordinator, title: "Failed Unlink") else {
+            XCTFail("Expected the meeting to be recording")
+            return
+        }
+        let linked = try await waitUntil { try await self.isLinked(id) }
+        XCTAssertTrue(linked)
+
+        await coordinator.handle(.manualStop)
+
+        let inspected = await waitUntil { self.inspector.inspectCallCount == 1 }
+        XCTAssertTrue(inspected, "Finalize must trigger exactly one inspection")
+        await settle(.milliseconds(300))
+
+        let stillLinked = try await isLinked(id)
+        XCTAssertTrue(stillLinked, "The blocked unlink leaves the row linked")
+        XCTAssertTrue(fileExists(videoURL(id)), "A failed unlink must keep the file the row points at")
+    }
+
     /// End-to-end D-07 with the production inspector: the 0-byte file a stop before the
     /// first written frame leaves behind is deleted and unlinked.
     func testRealInspectorDeletesZeroByteVideo() async throws {

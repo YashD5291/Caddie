@@ -689,7 +689,8 @@ actor RecordingCoordinator {
         }
     }
 
-    private func unlinkVideo(meetingId: String) async {
+    /// Clears both video columns. Returns whether the write succeeded.
+    private func unlinkVideo(meetingId: String) async -> Bool {
         do {
             try await database.dbWriter.write { dbConn in
                 try dbConn.execute(
@@ -697,8 +698,10 @@ actor RecordingCoordinator {
                     arguments: [meetingId]
                 )
             }
+            return true
         } catch {
             logger.error("Failed to unlink video from meeting \(meetingId): \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -729,14 +732,12 @@ actor RecordingCoordinator {
             logger.info("Video verified for \(meetingId): \(inspection.durationSeconds, format: .fixed(precision: 1))s, \(inspection.videoTrackCount) track(s)")
             return true
         case .inspected(let inspection):
-            await discardUnusableVideo(
+            return await discardUnusableVideo(
                 meetingId: meetingId, url: url, linked: linked,
                 reason: "playable=\(inspection.isPlayable) duration=\(inspection.durationSeconds)s videoTracks=\(inspection.videoTrackCount)"
             )
-            return false
         case .unreadable(let reason):
-            await discardUnusableVideo(meetingId: meetingId, url: url, linked: linked, reason: reason)
-            return false
+            return await discardUnusableVideo(meetingId: meetingId, url: url, linked: linked, reason: reason)
         case .inconclusive(let reason):
             // Not a D-07 verdict: the probe failed for a reason unrelated to the content,
             // so deleting could destroy a good recording.
@@ -744,10 +745,9 @@ actor RecordingCoordinator {
             return linked
         case .missing:
             logger.warning("Finalized video \(url.lastPathComponent) for meeting \(meetingId) is missing from disk")
-            if linked {
-                await unlinkVideo(meetingId: meetingId)
-            }
-            return false
+            guard linked else { return false }
+            let unlinked = await unlinkVideo(meetingId: meetingId)
+            return !unlinked
         }
     }
 
@@ -765,17 +765,24 @@ actor RecordingCoordinator {
         }
     }
 
-    /// D-07: a finalized `.mov` with no usable video is deleted and both columns cleared.
-    /// Logged, not surfaced: a late finalize can land during a later meeting, where a
-    /// message would be misattributed.
-    private func discardUnusableVideo(meetingId: String, url: URL, linked: Bool, reason: String) async {
-        AudioFileManager.removeFileIfPresent(at: url)
+    /// D-07: a finalized `.mov` with no usable video has both columns cleared, then is
+    /// deleted. Returns whether the row is still linked. Unlinks first: if the unlink
+    /// fails the file is kept, because a link to a missing file is worse than an unusable
+    /// file on disk. Logged, not surfaced: a late finalize can land during a later
+    /// meeting, where a message would be misattributed.
+    private func discardUnusableVideo(meetingId: String, url: URL, linked: Bool, reason: String) async -> Bool {
         if linked {
-            await unlinkVideo(meetingId: meetingId)
-            logger.error("Discarded unusable video \(url.lastPathComponent) for meeting \(meetingId) and unlinked it: \(reason)")
-        } else {
-            logger.warning("Discarded unusable video \(url.lastPathComponent) for meeting \(meetingId), no frame was linked: \(reason)")
+            guard await unlinkVideo(meetingId: meetingId) else {
+                logger.error("Kept unusable video \(url.lastPathComponent) for meeting \(meetingId) because unlinking it failed: \(reason)")
+                return true
+            }
+            AudioFileManager.removeFileIfPresent(at: url)
+            logger.error("Unlinked and discarded unusable video \(url.lastPathComponent) for meeting \(meetingId): \(reason)")
+            return false
         }
+        AudioFileManager.removeFileIfPresent(at: url)
+        logger.warning("Discarded unusable video \(url.lastPathComponent) for meeting \(meetingId), no frame was linked: \(reason)")
+        return false
     }
 
     /// Authoritative mid-meeting death signal (window closed, SCK error -3821). The
