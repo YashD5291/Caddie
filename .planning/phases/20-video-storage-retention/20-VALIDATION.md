@@ -1,9 +1,9 @@
 ---
 phase: 20
 slug: video-storage-retention
-status: draft
+status: complete
 nyquist_compliant: false
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-11-19
 ---
 
@@ -147,6 +147,10 @@ Pre-existing `.mov` files in `~/Library/Application Support/Caddie/audio/`, each
 ### Gate verdict
 
 Checks 1–7 pass with measured values. Check 1 was observed as end-state only (P-1). Check 7 passed on the LaunchServices re-run (D-5); the 14.2-floor re-run is still a milestone-close item. Check 8 is unit-verified only. No Phase 20 defect was found. Out-of-scope findings D-3 (stuck `recording` rows after a quit), D-4 (log redaction) and D-5 (gate script TCC attribution) are logged in `deferred-items.md`.
+
+### Post-review-fix re-check (2026-11-20)
+
+After the 10 review-fix commits (`213464c..b9edb92`), checks 3 and 5 were repeated on the rebuilt HEAD `67d6db9`. Meeting `323f5742-61f`: linked on the first frame with offset 0.193064874998527 s; `Video verified … 20.3s, 1 track(s)` after finalize; `VALIDATE isPlayable=true duration=20.298333333333332`, exit 0. After the UI delete, the row, `.mov` and `.m4a` are gone and the other 4 `.mov` are unchanged. Full details are in `20-VERIFICATION.md`. `make test` after the fixes: 435 tests, 0 failures.
 
 ---
 

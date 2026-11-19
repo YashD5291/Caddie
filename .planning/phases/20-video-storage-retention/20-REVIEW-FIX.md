@@ -7,8 +7,8 @@ findings_in_scope: 10
 fixed: 10
 skipped: 0
 status: all_fixed
-committed: false
-commit_gate: pending_user_approval
+committed: true
+commit_gate: approved (commits 213464c..b9edb92)
 ---
 
 # Phase 20: Code Review Fix Report
