@@ -43,6 +43,14 @@ actor RecordingCoordinator {
 
     private let availableDiskSpace: DiskSpaceProvider
 
+    /// Judges each finalized `.mov` (D-07). The verdict decides whether the file and its
+    /// link are kept.
+    private let videoInspector: any VideoFileInspecting
+
+    /// Where each meeting's `.mov` is written, inspected, and deleted. Production uses the
+    /// audio directory; it is injectable so tests never touch the user's real media (D-15).
+    private let videoDirectory: URL
+
     // MARK: - Callbacks
 
     private var onStateChange: (@Sendable (RecordingState) -> Void)?
@@ -116,6 +124,10 @@ actor RecordingCoordinator {
         var streamDied: Bool = false
     }
 
+    /// What one meeting's capture engine reports, in the order it happened. Fed by the
+    /// engine callbacks into that meeting's own stream (see `persistVideoLifecycle`).
+    private enum VideoEvent: Sendable { case firstFrame(UInt64), finalized }
+
     private var videoContext: VideoContext?
     private var videoStartTask: Task<Void, Never>?
 
@@ -131,7 +143,9 @@ actor RecordingCoordinator {
         audioDeviceManager: AudioDeviceManager? = nil,
         liveTranscriber: LiveTranscriber? = nil,
         screenRecorderFactory: ScreenRecorderFactory? = nil,
-        availableDiskSpace: @escaping DiskSpaceProvider = RecordingCoordinator.systemAvailableDiskSpace
+        availableDiskSpace: @escaping DiskSpaceProvider = RecordingCoordinator.systemAvailableDiskSpace,
+        videoInspector: any VideoFileInspecting = AVAssetVideoInspector(),
+        videoDirectory: URL = AudioFileManager.audioDirectory
     ) {
         self.database = database
         self.recorder = recorder
@@ -141,6 +155,8 @@ actor RecordingCoordinator {
         self.liveTranscriber = liveTranscriber
         self.screenRecorderFactory = screenRecorderFactory
         self.availableDiskSpace = availableDiskSpace
+        self.videoInspector = videoInspector
+        self.videoDirectory = videoDirectory
     }
 
     // MARK: - Public API
@@ -524,16 +540,32 @@ actor RecordingCoordinator {
         guard let screenRecorderFactory else { return }
 
         let recorder = screenRecorderFactory()
-        let url = AudioFileManager.videoPath(for: meetingId)
+        let url = AudioFileManager.videoPath(for: meetingId, in: videoDirectory)
 
-        // Both callbacks MUST be assigned BEFORE start(): the engine's WriterSink is
+        // One ordered event stream per meeting (D-05, D-06). The engine yields the first
+        // frame before it can finish writing, and AsyncStream keeps yield order, so the
+        // link always lands before the verdict.
+        let (events, continuation) = AsyncStream.makeStream(of: VideoEvent.self)
+
+        // All three callbacks MUST be assigned BEFORE start(): the engine's WriterSink is
         // constructed with the CURRENT values of these closures, so assigning after
-        // start() is a silent no-op — no anchor, and no mid-meeting death signal.
-        recorder.onFirstFrameHostTime = { [weak self] ticks in
-            Task { await self?.recordFirstFrameAnchor(ticks) }
+        // start() is a silent no-op — no anchor, no finalize signal, and no mid-meeting
+        // death signal.
+        recorder.onFirstFrameHostTime = { ticks in continuation.yield(.firstFrame(ticks)) }
+        recorder.onFinalized = {
+            continuation.yield(.finalized)
+            continuation.finish()
         }
         recorder.onStreamStopped = { [weak self] error in
             Task { await self?.handleVideoStreamStopped(error) }
+        }
+
+        // Created in actor context, so it inherits this actor's isolation, like
+        // videoStartTask. Deliberately neither stored nor awaited by teardown:
+        // pipeline.enqueue must never wait on finalize or inspection.
+        Task {
+            await self.persistVideoLifecycle(meetingId: meetingId, url: url,
+                                             audioStartTicks: audioStartTicks, events: events)
         }
 
         // Publish the context BEFORE starting, so a first frame delivered during the
@@ -567,21 +599,142 @@ actor RecordingCoordinator {
             logger.error("Screen capture failed to start for \(meetingId): \(error.localizedDescription)")
             surfaceVideoError("Screen recording unavailable — audio is still recording: \(error.localizedDescription)")
             videoContext = nil
+            // D-05: a failed start leaves no link and no file. End this meeting's stream so
+            // its consumer exits, and remove any partial the failed start left behind (a
+            // missing file is the expected case).
+            continuation.finish()
+            AudioFileManager.removeFileIfPresent(at: url)
         }
     }
 
-    /// Video half of the STOR-04 anchor pair. Phase 20 persists this pair to the
-    /// meetings row; Phase 19 holds it in memory and logs the derived offset.
-    private func recordFirstFrameAnchor(_ ticks: UInt64) {
-        guard var ctx = videoContext else { return }
-        ctx.firstFrameTicks = ticks
-        videoContext = ctx
+    /// Seconds from the audio start to the first written video frame (STOR-04, D-08).
+    ///
+    /// Movie time 0 is the first frame (the writer session starts at its timestamp), so
+    /// Phase 21 maps transcript time t to video time `t - video_start_offset`.
+    static func videoStartOffset(audioStartTicks: UInt64, firstFrameTicks: UInt64, timebase: mach_timebase_info_data_t) -> Double {
+        ScreenRecorder.hostTicksToSeconds(firstFrameTicks, timebase: timebase)
+            - ScreenRecorder.hostTicksToSeconds(audioStartTicks, timebase: timebase)
+    }
 
+    private static func hostTimebase() -> mach_timebase_info_data_t {
         var timebase = mach_timebase_info_data_t()
         mach_timebase_info(&timebase)
-        let offset = ScreenRecorder.hostTicksToSeconds(ticks, timebase: timebase)
-                   - ScreenRecorder.hostTicksToSeconds(ctx.audioStartTicks, timebase: timebase)
-        logger.info("Video anchor for \(ctx.meetingId): audioTicks=\(ctx.audioStartTicks) firstFrameTicks=\(ticks) offset=\(offset, format: .fixed(precision: 3))s")
+        return timebase
+    }
+
+    /// Video half of the STOR-04 anchor pair, kept in memory for the in-flight meeting
+    /// (the DEBUG `videoAnchorPair`) and logged. The funnel persists the offset to the row.
+    private func recordFirstFrameAnchor(meetingId: String, ticks: UInt64, offset: Double) {
+        guard var ctx = videoContext, ctx.meetingId == meetingId else { return }
+        ctx.firstFrameTicks = ticks
+        videoContext = ctx
+        logger.info("Video anchor for \(meetingId): audioTicks=\(ctx.audioStartTicks) firstFrameTicks=\(ticks) offset=\(offset, format: .fixed(precision: 3))s")
+    }
+
+    /// Consumes one meeting's video events in order: link on the first frame, verify on
+    /// finalize (D-05 as amended). Ends when the engine finalizes or the start fails.
+    ///
+    /// Every handler takes this meeting's id and url explicitly and never reads the
+    /// in-flight context: a late finalize can land after teardown cleared it, or after
+    /// meeting #2 started, and must still reconcile its own row (D-06).
+    private func persistVideoLifecycle(meetingId: String, url: URL, audioStartTicks: UInt64,
+                                       events: AsyncStream<VideoEvent>) async {
+        var linked = false
+        var offset: Double?
+        for await event in events {
+            switch event {
+            case .firstFrame(let ticks):
+                let firstFrameOffset = Self.videoStartOffset(audioStartTicks: audioStartTicks,
+                                                             firstFrameTicks: ticks,
+                                                             timebase: Self.hostTimebase())
+                offset = firstFrameOffset
+                recordFirstFrameAnchor(meetingId: meetingId, ticks: ticks, offset: firstFrameOffset)
+                linked = await linkVideo(meetingId: meetingId, fileName: url.lastPathComponent,
+                                         offset: firstFrameOffset)
+            case .finalized:
+                linked = await reconcileFinalizedVideo(meetingId: meetingId, url: url,
+                                                       linked: linked, offset: offset)
+            }
+        }
+    }
+
+    /// Links the video and its anchor in one targeted write (D-05, D-08). Returns whether
+    /// the write succeeded. Never a full-record update, which could clobber other columns.
+    private func linkVideo(meetingId: String, fileName: String, offset: Double?) async -> Bool {
+        do {
+            try await database.dbWriter.write { dbConn in
+                try dbConn.execute(
+                    sql: "UPDATE meetings SET video_file = ?, video_start_offset = ? WHERE meeting_id = ?",
+                    arguments: [fileName, offset, meetingId]
+                )
+            }
+            logger.info("Linked video \(fileName) to meeting \(meetingId)")
+            return true
+        } catch {
+            logger.error("Failed to link video \(fileName) to meeting \(meetingId): \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func unlinkVideo(meetingId: String) async {
+        do {
+            try await database.dbWriter.write { dbConn in
+                try dbConn.execute(
+                    sql: "UPDATE meetings SET video_file = NULL, video_start_offset = NULL WHERE meeting_id = ?",
+                    arguments: [meetingId]
+                )
+            }
+        } catch {
+            logger.error("Failed to unlink video from meeting \(meetingId): \(error.localizedDescription)")
+        }
+    }
+
+    /// Verifies the finished file and returns whether the row is linked afterwards
+    /// (D-05, D-07).
+    ///
+    /// Runs only on the engine's finalize signal. Finalize rewrites the file in place,
+    /// so inspecting or deleting any earlier would judge, or destroy, a file mid-rewrite
+    /// (D-13).
+    private func reconcileFinalizedVideo(meetingId: String, url: URL, linked: Bool,
+                                         offset: Double?) async -> Bool {
+        let result = await videoInspector.inspect(url)
+        switch result {
+        case .inspected(let inspection) where inspection.isUsable:
+            guard linked else {
+                return await linkVideo(meetingId: meetingId, fileName: url.lastPathComponent, offset: offset)
+            }
+            // No second write: meetings_au re-indexes FTS on every UPDATE of the row.
+            logger.info("Video verified for \(meetingId): \(inspection.durationSeconds, format: .fixed(precision: 1))s, \(inspection.videoTrackCount) track(s)")
+            return true
+        case .inspected(let inspection):
+            await discardUnusableVideo(
+                meetingId: meetingId, url: url, linked: linked,
+                reason: "playable=\(inspection.isPlayable) duration=\(inspection.durationSeconds)s videoTracks=\(inspection.videoTrackCount)"
+            )
+            return false
+        case .unreadable(let reason):
+            await discardUnusableVideo(meetingId: meetingId, url: url, linked: linked, reason: reason)
+            return false
+        case .missing:
+            logger.warning("Finalized video \(url.lastPathComponent) for meeting \(meetingId) is missing from disk")
+            if linked {
+                await unlinkVideo(meetingId: meetingId)
+            }
+            return false
+        }
+    }
+
+    /// D-07: a finalized `.mov` with no usable video is deleted and both columns cleared.
+    /// Logged, not surfaced: a late finalize can land during a later meeting, where a
+    /// message would be misattributed.
+    private func discardUnusableVideo(meetingId: String, url: URL, linked: Bool, reason: String) async {
+        AudioFileManager.removeFileIfPresent(at: url)
+        if linked {
+            await unlinkVideo(meetingId: meetingId)
+            logger.error("Discarded unusable video \(url.lastPathComponent) for meeting \(meetingId) and unlinked it: \(reason)")
+        } else {
+            logger.warning("Discarded unusable video \(url.lastPathComponent) for meeting \(meetingId), no frame was linked: \(reason)")
+        }
     }
 
     /// Authoritative mid-meeting death signal (window closed, SCK error -3821). The
