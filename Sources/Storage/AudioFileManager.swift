@@ -332,7 +332,7 @@ enum AudioFileManager {
         }
     }
 
-    /// Deletes `.mov` files in `directory` whose meeting id has no row.
+    /// Deletes `.mov` files in `directory` whose meeting id has no row and no audio.
     ///
     /// Lists the files first and reads the ids second. `RecordingCoordinator` inserts the
     /// meeting row before it starts audio or video, so every `.mov` that exists at listing
@@ -343,8 +343,13 @@ enum AudioFileManager {
     /// meetings") and when the id set is empty while videos exist (a lost or recreated
     /// database must never wipe every video). Must run before any recording can start.
     ///
+    /// A row-less `.mov` is deleted only when it also has no sibling `.m4a` or `.wav`. A
+    /// real orphan never has audio: older versions deleted a meeting's audio and left its
+    /// video. A lost, recreated, or stale-restored database leaves the audio in place, so
+    /// that video is kept (D-14).
+    ///
     /// Unlike the Settings orphaned-WAV finder, this never treats every file with the extension as an
-    /// orphan: only regular `.mov` files without a meeting row are removed.
+    /// orphan: only regular `.mov` files without a meeting row and without audio are removed.
     static func cleanupOrphanedVideos(in directory: URL = audioDirectory, knownMeetingIds: () throws -> Set<String>) {
         let contents: [URL]
         do {
@@ -373,7 +378,15 @@ enum AudioFileManager {
             return
         }
 
-        let orphans = videos.filter { !ids.contains($0.deletingPathExtension().lastPathComponent) }
+        let orphans = videos.filter { video in
+            let stem = video.deletingPathExtension().lastPathComponent
+            guard !ids.contains(stem) else { return false }
+            guard !hasSiblingAudio(stem: stem, in: directory) else {
+                logger.warning("Keeping row-less video \(video.lastPathComponent): its audio still exists, so the database may be stale")
+                return false
+            }
+            return true
+        }
         for orphan in orphans {
             logger.info("Removing orphaned video \(orphan.lastPathComponent)")
             removeFileIfPresent(at: orphan)
@@ -381,6 +394,13 @@ enum AudioFileManager {
 
         if !orphans.isEmpty {
             logger.info("Cleaned up \(orphans.count) orphaned video file(s)")
+        }
+    }
+
+    /// True when the meeting's `.m4a` or `.wav` is still in `directory`.
+    private static func hasSiblingAudio(stem: String, in directory: URL) -> Bool {
+        ["m4a", "wav"].contains { ext in
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent("\(stem).\(ext)").path)
         }
     }
 

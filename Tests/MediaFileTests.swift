@@ -111,15 +111,34 @@ final class MediaFileTests: XCTestCase {
     func testSweepDeletesOnlyRowlessMovFiles() throws {
         let keepMov = try touch("keep.mov", in: tempDir)
         let orphanMov = try touch("orphan.mov", in: tempDir)
-        let orphanWav = try touch("orphan.wav", in: tempDir)
-        let orphanM4a = try touch("orphan.m4a", in: tempDir)
+        let strayWav = try touch("stray.wav", in: tempDir)
+        let strayM4a = try touch("stray.m4a", in: tempDir)
 
         AudioFileManager.cleanupOrphanedVideos(in: tempDir) { ["keep"] }
 
-        XCTAssertFalse(exists(orphanMov), "A .mov with no meeting row must be deleted")
+        XCTAssertFalse(exists(orphanMov), "A .mov with no meeting row and no audio must be deleted")
         XCTAssertTrue(exists(keepMov))
-        XCTAssertTrue(exists(orphanWav), "The sweep only touches .mov files")
-        XCTAssertTrue(exists(orphanM4a), "The sweep only touches .mov files")
+        XCTAssertTrue(exists(strayWav), "The sweep only touches .mov files")
+        XCTAssertTrue(exists(strayM4a), "The sweep only touches .mov files")
+    }
+
+    /// CR-01: a lost or stale-restored database still has at least one row, but every
+    /// meeting it forgot keeps its audio. A row-less `.mov` with sibling audio therefore
+    /// means "stale database", not "orphan", and must survive the sweep.
+    func testSweepKeepsRowlessMovThatStillHasAudio() throws {
+        let knownMov = try touch("known.mov", in: tempDir)
+        let restoredMov = try touch("restored.mov", in: tempDir)
+        try touch("restored.m4a", in: tempDir)
+        let recoveredMov = try touch("recovered.mov", in: tempDir)
+        try touch("recovered.wav", in: tempDir)
+        let orphanMov = try touch("orphan.mov", in: tempDir)
+
+        AudioFileManager.cleanupOrphanedVideos(in: tempDir) { ["known"] }
+
+        XCTAssertTrue(exists(restoredMov), "A row-less .mov whose .m4a still exists must be kept")
+        XCTAssertTrue(exists(recoveredMov), "A row-less .mov whose .wav still exists must be kept")
+        XCTAssertFalse(exists(orphanMov), "A row-less .mov with no audio is a real orphan")
+        XCTAssertTrue(exists(knownMov))
     }
 
     func testSweepMatchesMovExtensionCaseInsensitively() throws {
