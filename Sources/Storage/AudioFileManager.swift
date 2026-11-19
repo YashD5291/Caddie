@@ -332,6 +332,70 @@ enum AudioFileManager {
         }
     }
 
+    /// Deletes `.mov` files in `directory` whose meeting id has no row.
+    ///
+    /// Lists the files first and reads the ids second. `RecordingCoordinator` inserts the
+    /// meeting row before it starts audio or video, so every `.mov` that exists at listing
+    /// time already has its row and a later id read always contains it. Reading ids first
+    /// could delete the video of a recording that started in between.
+    ///
+    /// Skips the sweep entirely when the ids cannot be read (a failed read is not "no
+    /// meetings") and when the id set is empty while videos exist (a lost or recreated
+    /// database must never wipe every video). Must run before any recording can start.
+    ///
+    /// Unlike the Settings orphaned-WAV finder, this never treats every file with the extension as an
+    /// orphan: only regular `.mov` files without a meeting row are removed.
+    static func cleanupOrphanedVideos(in directory: URL = audioDirectory, knownMeetingIds: () throws -> Set<String>) {
+        let contents: [URL]
+        do {
+            contents = try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey]
+            )
+        } catch {
+            logger.warning("Skipping orphan video cleanup — cannot list \(directory.lastPathComponent): \(error.localizedDescription)")
+            return
+        }
+
+        let videos = contents.filter(isRegularMovFile)
+        guard !videos.isEmpty else { return }
+
+        let ids: Set<String>
+        do {
+            ids = try knownMeetingIds()
+        } catch {
+            logger.error("Skipping orphan video cleanup — could not read meetings: \(error.localizedDescription)")
+            return
+        }
+
+        guard !ids.isEmpty else {
+            logger.warning("Skipping orphan video cleanup — the meetings table is empty but \(videos.count) video file(s) exist; refusing to treat every video as an orphan")
+            return
+        }
+
+        let orphans = videos.filter { !ids.contains($0.deletingPathExtension().lastPathComponent) }
+        for orphan in orphans {
+            logger.info("Removing orphaned video \(orphan.lastPathComponent)")
+            removeFileIfPresent(at: orphan)
+        }
+
+        if !orphans.isEmpty {
+            logger.info("Cleaned up \(orphans.count) orphaned video file(s)")
+        }
+    }
+
+    /// True for a regular file with a `.mov` extension (any case). A file whose type
+    /// cannot be read is excluded: never delete what could not be classified.
+    private static func isRegularMovFile(_ url: URL) -> Bool {
+        guard url.pathExtension.lowercased() == "mov" else { return false }
+        do {
+            return try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
+        } catch {
+            logger.warning("Skipping \(url.lastPathComponent) in orphan video cleanup — cannot read file type: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     // MARK: - Errors
 
     enum AudioError: Error {
