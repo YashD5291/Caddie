@@ -16,9 +16,9 @@ final class RecordingCoordinatorDiskGuardTests: XCTestCase {
     var pipeline: TranscriptionPipeline!
     var factory: MockScreenRecorderFactory!
 
-    private static let fourHundredMiB: Int64 = 419_430_400
-    private static let sixHundredMiB: Int64 = 629_145_600
-    private static let oneGB: Int64 = 1_000_000_000
+    nonisolated private static let fourHundredMiB: Int64 = 419_430_400
+    nonisolated private static let sixHundredMiB: Int64 = 629_145_600
+    nonisolated private static let oneGB: Int64 = 1_000_000_000
 
     override func setUpWithError() throws {
         db = try AppDatabase(inMemory: true)

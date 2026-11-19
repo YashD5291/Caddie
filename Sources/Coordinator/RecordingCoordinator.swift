@@ -37,6 +37,12 @@ actor RecordingCoordinator {
     /// defensive `deinit` finalize act as a second safety net for the file.
     private let screenRecorderFactory: ScreenRecorderFactory?
 
+    /// Reads the free space the disk guard decides on. A throw blocks the start with that
+    /// error; `nil` reads as 0 and blocks too, so an unknown capacity never passes.
+    typealias DiskSpaceProvider = @Sendable () throws -> Int64?
+
+    private let availableDiskSpace: DiskSpaceProvider
+
     // MARK: - Callbacks
 
     private var onStateChange: (@Sendable (RecordingState) -> Void)?
@@ -124,7 +130,8 @@ actor RecordingCoordinator {
         detector: MeetingDetector,
         audioDeviceManager: AudioDeviceManager? = nil,
         liveTranscriber: LiveTranscriber? = nil,
-        screenRecorderFactory: ScreenRecorderFactory? = nil
+        screenRecorderFactory: ScreenRecorderFactory? = nil,
+        availableDiskSpace: @escaping DiskSpaceProvider = RecordingCoordinator.systemAvailableDiskSpace
     ) {
         self.database = database
         self.recorder = recorder
@@ -133,6 +140,7 @@ actor RecordingCoordinator {
         self.audioDeviceManager = audioDeviceManager
         self.liveTranscriber = liveTranscriber
         self.screenRecorderFactory = screenRecorderFactory
+        self.availableDiskSpace = availableDiskSpace
     }
 
     // MARK: - Public API
@@ -338,18 +346,36 @@ actor RecordingCoordinator {
         return "Not enough free disk space for video (\(free) free, \(needed) needed) — this meeting is recording audio only"
     }
 
-    private func checkDiskSpace() throws {
-        let resourceValues = try AudioFileManager.audioDirectory.resourceValues(
+    /// The preset used for capture AND for the video disk threshold. Phase 21's quality
+    /// picker changes this one place.
+    private static let videoPreset: ScreenRecorder.QualityPreset = .default
+
+    /// Default `DiskSpaceProvider`: the audio volume's capacity for important usage, which
+    /// counts purgeable space. A thrown read propagates and a missing value passes through
+    /// as `nil`.
+    static func systemAvailableDiskSpace() throws -> Int64? {
+        try AudioFileManager.audioDirectory.resourceValues(
             forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+        ).volumeAvailableCapacityForImportantUsage
+    }
+
+    /// Reads capacity ONCE and decides both tiers from that snapshot. Throws only for
+    /// `.belowAudioFloor` (or a failed read); the video tier never fails the start (D-01).
+    /// The video tier applies only when screen recording is on, the same "inert by
+    /// absence" gate as `startVideo` (D-03).
+    private func evaluateDiskSpace() throws -> (tier: DiskSpaceTier, availableBytes: Int64) {
+        let availableBytes = try availableDiskSpace() ?? 0
+        let tier = Self.diskSpaceTier(
+            available: availableBytes,
+            videoPreset: screenRecorderFactory != nil ? Self.videoPreset : nil
         )
-        guard let available = resourceValues.volumeAvailableCapacityForImportantUsage,
-              available >= Self.minimumDiskSpaceBytes else {
-            let available = resourceValues.volumeAvailableCapacityForImportantUsage ?? 0
+        if tier == .belowAudioFloor {
             throw CoordinatorError.insufficientDiskSpace(
-                available: available,
+                available: availableBytes,
                 required: Self.minimumDiskSpaceBytes
             )
         }
+        return (tier, availableBytes)
     }
 
     // MARK: - Side Effect Execution
@@ -374,8 +400,9 @@ actor RecordingCoordinator {
     }
 
     private func executeStartRecording(meetingId: String, meeting: DetectedMeeting) async {
+        let diskCheck: (tier: DiskSpaceTier, availableBytes: Int64)
         do {
-            try checkDiskSpace()
+            diskCheck = try evaluateDiskSpace()
         } catch {
             logger.error("Disk space check failed: \(error.localizedDescription)")
             await handle(.recordingFailed(error))
@@ -448,8 +475,14 @@ actor RecordingCoordinator {
 
             // Video is subordinate to audio: it starts only once audio is genuinely
             // running, and nothing in the video path can precede, gate, or fail the
-            // audio start (VID-03 / VID-04).
-            startVideo(meetingId: meetingId, audioStartTicks: audioStartTicks)
+            // audio start (VID-03 / VID-04). Low disk skips video here, after audio is
+            // running and after `.recording` was published, so AppState's clear-on-
+            // recording cannot erase the message (Pitfall 3).
+            if diskCheck.tier == .belowVideoThreshold {
+                skipVideoForLowDisk(meetingId: meetingId, availableBytes: diskCheck.availableBytes)
+            } else {
+                startVideo(meetingId: meetingId, audioStartTicks: audioStartTicks)
+            }
 
             NotificationManager.recordingStarted(title: meeting.title)
             logger.info("Recording started for meeting \(meetingId)")
@@ -479,6 +512,14 @@ actor RecordingCoordinator {
         }
     }
 
+    /// Low-disk video skip (D-01): the meeting records audio only and the reason goes to
+    /// the non-fatal video channel. Never fails the recording and never touches `state`.
+    private func skipVideoForLowDisk(meetingId: String, availableBytes: Int64) {
+        let requiredBytes = Self.videoDiskThreshold(for: Self.videoPreset)
+        logger.warning("Skipping screen capture for \(meetingId): \(availableBytes) bytes free, \(requiredBytes) needed for video")
+        surfaceVideoError(Self.lowDiskVideoMessage(availableBytes: availableBytes, requiredBytes: requiredBytes))
+    }
+
     private func startVideoInner(meetingId: String, audioStartTicks: UInt64) async {
         guard let screenRecorderFactory else { return }
 
@@ -506,9 +547,9 @@ actor RecordingCoordinator {
 
         do {
             // Phase 21 owns the user-facing target/preset choice; `.display(nil)` and
-            // `.balanced` are the interim defaults. Constructed at the call site, so the
-            // non-Sendable CaptureTarget is a disconnected region — no isolation problem.
-            try await recorder.start(target: .display(nil), preset: .balanced, outputURL: url)
+            // `Self.videoPreset` are the interim defaults. Constructed at the call site, so
+            // the non-Sendable CaptureTarget is a disconnected region — no isolation problem.
+            try await recorder.start(target: .display(nil), preset: Self.videoPreset, outputURL: url)
 
             guard videoContext?.meetingId == meetingId else {
                 // Teardown raced ahead of this start. 19-03 joins videoStartTask before
