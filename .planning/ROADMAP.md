@@ -25,7 +25,7 @@
 
 - [x] **Phase 18: Screen Capture Engine** - Standalone `ScreenRecorder` writes a crash-safe, bitrate-capped HEVC `.mov` with timing anchors (completed 2026-07-09)
 - [x] **Phase 19: Recording Lifecycle Integration** - Video starts/stops with the meeting and can never take down the audio recording (completed 2026-07-30)
-- [ ] **Phase 20: Video Storage & Retention** - Video files linked to meetings, deleted with them, and guarded against disk exhaustion
+- [x] **Phase 20: Video Storage & Retention** - Video files linked to meetings, deleted with them, and guarded against disk exhaustion (completed 2026-11-19)
 - [ ] **Phase 21: Settings, Playback & Alignment** - User controls, in-app AVKit playback, transcript-seek, and export
 
 ## Phase Details
@@ -94,7 +94,7 @@
 - [x] 20-05-PLAN.md — Two-tier disk guard (block < 500 MB; audio-only below preset video threshold) + capacity seam (TDD)
 - [x] 20-06-PLAN.md — Per-meeting event funnel: link on first frame, verify/discard on finalize, every finalize path (TDD)
 - [x] 20-07-PLAN.md — README (D-12), "Storage used" label, STOR-03 wording + STOR-04 traceability in REQUIREMENTS/ROADMAP
-- [ ] 20-08-PLAN.md — Hardware verification checkpoint (real migration, sweep, link + offset, quit partial, delete, kill-9)
+- [x] 20-08-PLAN.md — Hardware verification checkpoint (real migration, sweep, link + offset, quit partial, delete, kill-9)
 
 ### Phase 21: Settings, Playback & Alignment
 
@@ -124,5 +124,5 @@ Phases execute in numeric order: 18 → 19 → 20 → 21
 | 11–17. Calendar + Remote Recording | v2.0 | — | ✅ Complete | 2026-07-01 |
 | 18. Screen Capture Engine | v3.0 | 4/4 | Complete    | 2026-07-09 |
 | 19. Recording Lifecycle Integration | v3.0 | 5/5 | Complete    | 2026-07-30 |
-| 20. Video Storage & Retention | v3.0 | 7/8 | In Progress|  |
+| 20. Video Storage & Retention | v3.0 | 8/8 | Complete   | 2026-11-19 |
 | 21. Settings, Playback & Alignment | v3.0 | 0/TBD | Not started | - |
