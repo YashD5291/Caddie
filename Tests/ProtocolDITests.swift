@@ -3,6 +3,17 @@ import XCTest
 
 final class ProtocolDITests: XCTestCase {
 
+    private var tempDir: URL!
+
+    override func setUpWithError() throws {
+        tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try FileManager.default.removeItem(at: tempDir)
+    }
+
     func testMockASREngineConformsToProtocolAndReturnsCannedSegments() async throws {
         let mock = MockASREngine()
         let result = try await mock.transcribe(audioURL: URL(fileURLWithPath: "/tmp/test.wav"))
@@ -55,4 +66,146 @@ final class ProtocolDITests: XCTestCase {
         // rely on every call vending a distinct object.
         XCTAssertFalse(a === b)
     }
+
+    // MARK: - Finalize contract (Phase 20)
+
+    func testOnFinalizedIsSettableThroughSeam() {
+        // Compiles only if the seam requires onFinalized; the engine satisfies it.
+        let recorder: ScreenRecording = ScreenRecorder()
+        recorder.onFinalized = {}
+        XCTAssertNotNil(recorder.onFinalized)
+    }
+
+    func testMockFinalizesOnceOnStop() async throws {
+        let recorder = MockScreenRecorder()
+        let log = FinalizeLog()
+        recorder.onFinalized = { [weak recorder] in log.record(stopCount: recorder?.stopCallCount ?? -1) }
+
+        try await recorder.start(target: .display(nil), preset: .compact, outputURL: movURL())
+        await recorder.stop()
+
+        XCTAssertEqual(log.stopCountsAtFire, [1], "Fires once, after the stop counter increments")
+    }
+
+    func testMockSimulatedFinalizeIsNotRepeatedByStop() async throws {
+        let recorder = MockScreenRecorder()
+        let log = FinalizeLog()
+        recorder.onFinalized = { log.record(stopCount: 0) }
+
+        try await recorder.start(target: .display(nil), preset: .compact, outputURL: movURL())
+        // Stream death mid-meeting finalizes before teardown; the later stop() must not
+        // fire a second time, mirroring the engine's idempotency guard (D-06).
+        recorder.simulateStreamDeath(MockScreenRecorderError(message: "SCK -3821"))
+        recorder.simulateFinalize()
+        XCTAssertEqual(log.count, 1)
+
+        await recorder.stop()
+
+        XCTAssertEqual(recorder.stopCallCount, 1)
+        XCTAssertEqual(log.count, 1)
+    }
+
+    func testMockNeverFinalizeSuppressesSignal() async throws {
+        let recorder = MockScreenRecorder()
+        recorder.neverFinalize = true
+        let log = FinalizeLog()
+        recorder.onFinalized = { log.record(stopCount: 0) }
+
+        try await recorder.start(target: .display(nil), preset: .compact, outputURL: movURL())
+        await recorder.stop()
+
+        XCTAssertEqual(recorder.stopCallCount, 1)
+        XCTAssertEqual(log.count, 0, "Models app quit or a wedged finalize")
+    }
+
+    func testMockDelayedFinalizeFiresAfterStopReturns() async throws {
+        let recorder = MockScreenRecorder()
+        recorder.finalizeDelay = .milliseconds(300)
+        let log = FinalizeLog()
+        let finalized = expectation(description: "late onFinalized")
+        finalized.assertForOverFulfill = true
+        recorder.onFinalized = {
+            log.record(stopCount: 0)
+            finalized.fulfill()
+        }
+
+        try await recorder.start(target: .display(nil), preset: .compact, outputURL: movURL())
+        await recorder.stop()
+        XCTAssertEqual(log.count, 0, "stop() must return before a late finalize arrives")
+
+        await fulfillment(of: [finalized], timeout: 5)
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(log.count, 1)
+    }
+
+    func testMockFailedStartNeverFinalizes() async throws {
+        let recorder = MockScreenRecorder()
+        recorder.startError = MockScreenRecorderError(message: "TCC denied")
+        let log = FinalizeLog()
+        recorder.onFinalized = { log.record(stopCount: 0) }
+
+        do {
+            try await recorder.start(target: .display(nil), preset: .compact, outputURL: movURL())
+            XCTFail("start should have thrown")
+        } catch let error as MockScreenRecorderError {
+            XCTAssertEqual(error.message, "TCC denied")
+        }
+        // The real engine's stop() is a no-op after a failed start: no writer, no signal.
+        await recorder.stop()
+
+        XCTAssertEqual(log.count, 0)
+    }
+
+    func testMockCreatesFileOnStartBeforeThrowing() async throws {
+        let recorder = MockScreenRecorder()
+        recorder.createsFileOnStart = true
+        recorder.startError = MockScreenRecorderError(message: "TCC denied")
+        let url = movURL()
+
+        do {
+            try await recorder.start(target: .display(nil), preset: .compact, outputURL: url)
+            XCTFail("start should have thrown")
+        } catch let error as MockScreenRecorderError {
+            XCTAssertEqual(error.message, "TCC denied")
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path),
+                      "A failed start can leave a file the coordinator must clean up")
+        XCTAssertEqual(try Data(contentsOf: url).count, 0)
+    }
+
+    func testFactoryPropagatesFinalizeKnobs() throws {
+        let factory = MockScreenRecorderFactory()
+        factory.finalizeDelay = .milliseconds(250)
+        factory.neverFinalize = true
+        factory.createsFileOnStart = true
+
+        let vended = try XCTUnwrap(factory.factory() as? MockScreenRecorder)
+
+        XCTAssertEqual(vended.finalizeDelay, .milliseconds(250))
+        XCTAssertTrue(vended.neverFinalize)
+        XCTAssertTrue(vended.createsFileOnStart)
+    }
+
+    // MARK: - Helpers
+
+    /// Never under the real audio directory (D-15).
+    private func movURL() -> URL {
+        tempDir.appendingPathComponent("\(UUID().uuidString).mov")
+    }
+}
+
+/// Records each `onFinalized` fire with the mock's stop count at that moment. The callback
+/// can arrive from an unstructured `Task` while the test body reads from the test executor,
+/// so the log is lock-guarded.
+private final class FinalizeLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _stopCountsAtFire: [Int] = []
+
+    func record(stopCount: Int) {
+        lock.withLock { _stopCountsAtFire.append(stopCount) }
+    }
+
+    var stopCountsAtFire: [Int] { lock.withLock { _stopCountsAtFire } }
+    var count: Int { stopCountsAtFire.count }
 }
