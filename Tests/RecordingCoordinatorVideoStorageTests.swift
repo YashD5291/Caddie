@@ -259,8 +259,9 @@ final class RecordingCoordinatorVideoStorageTests: CoordinatorTestCase {
         XCTAssertTrue(unlinked, "A failed start must leave both columns NULL")
         XCTAssertEqual(inspector.inspectCallCount, 0, "A failed start is never inspected")
 
+        // The failed start already finished this meeting's event stream, so nothing can
+        // arrive after the stop.
         await coordinator.handle(.manualStop)
-        await settle(.milliseconds(300))
         let stillUnlinked = try await isUnlinked(id)
         XCTAssertTrue(stillUnlinked)
         XCTAssertEqual(inspector.inspectCallCount, 0, "Teardown after a failed start inspects nothing")
@@ -277,7 +278,6 @@ final class RecordingCoordinatorVideoStorageTests: CoordinatorTestCase {
         }
 
         await coordinator.handle(.manualStop)
-        await settle(.milliseconds(300))
 
         let unlinked = try await isUnlinked(id)
         XCTAssertTrue(unlinked, "An audio-only meeting leaves both columns NULL")
@@ -292,7 +292,7 @@ final class RecordingCoordinatorVideoStorageTests: CoordinatorTestCase {
     /// Finalize never gates transcription: the meeting is enqueued before its video is
     /// even final, and the inspection happens once, later.
     func testFinalizeNeverDelaysTranscription() async throws {
-        factory.finalizeDelay = .seconds(2)
+        factory.neverFinalize = true
         let coordinator = makeCoordinator()
         guard let id = await startMeeting(coordinator, title: "Slow Finalize") else {
             XCTFail("Expected the meeting to be recording")
@@ -311,9 +311,11 @@ final class RecordingCoordinatorVideoStorageTests: CoordinatorTestCase {
         XCTAssertEqual(inspector.inspectCallCount, 0,
                        "The meeting must be enqueued before its video finalizes")
 
-        let inspected = await waitUntil(timeout: .seconds(5)) { self.inspector.inspectCallCount == 1 }
+        // The finalize lands only now, and it finishes the meeting's event stream, so no
+        // second inspection can follow.
+        try XCTUnwrap(factory.latest).simulateFinalize()
+        let inspected = await waitUntil { self.inspector.inspectCallCount == 1 }
         XCTAssertTrue(inspected, "The late finalize must still be inspected")
-        await settle(.milliseconds(300))
         XCTAssertEqual(inspector.inspectCallCount, 1, "The late finalize is inspected exactly once")
     }
 
@@ -322,7 +324,7 @@ final class RecordingCoordinatorVideoStorageTests: CoordinatorTestCase {
     /// A finalize that lands after the meeting is already transcribing still reconciles
     /// that meeting's row, and the row stays linked until it does.
     func testLateFinalizeAfterTranscribingStillReconcilesRow() async throws {
-        factory.finalizeDelay = .milliseconds(800)
+        factory.neverFinalize = true
         let coordinator = makeCoordinator()
         guard let id = await startMeeting(coordinator, title: "Late Finalize") else {
             XCTFail("Expected the meeting to be recording")
@@ -342,6 +344,7 @@ final class RecordingCoordinatorVideoStorageTests: CoordinatorTestCase {
         let linkedWhilePending = try await isLinked(id)
         XCTAssertTrue(linkedWhilePending, "The row stays linked until the finalize lands")
 
+        try XCTUnwrap(factory.latest).simulateFinalize()
         let unlinked = try await waitUntil { try await self.isUnlinked(id) }
         XCTAssertTrue(unlinked, "The late finalize must still reconcile the meeting's row")
         XCTAssertEqual(inspector.inspectCallCount, 1)
@@ -420,8 +423,9 @@ final class RecordingCoordinatorVideoStorageTests: CoordinatorTestCase {
         let partialLinked = try await isLinked(id)
         XCTAssertTrue(partialLinked, "A usable partial stays linked (D-06)")
 
+        // The mid-meeting finalize finished the event stream, so teardown cannot reach the
+        // inspector again.
         await coordinator.handle(.manualStop)
-        await settle(.milliseconds(300))
 
         XCTAssertEqual(inspector.inspectCallCount, 1, "Teardown must not trigger a second inspection")
         XCTAssertEqual(engine.stopCallCount, 1, "Teardown still stops the dead stream's engine")
