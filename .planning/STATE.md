@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
-status: verifying
-stopped_at: Completed 20-08-PLAN.md
-last_updated: "2026-11-19T17:44:47.825Z"
+status: ready_to_plan
+stopped_at: Phase 20 complete (8/8) — ready to discuss Phase 21
+last_updated: 2026-11-19T19:02:37.366Z
 last_activity: 2026-11-19
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 17
-  completed_plans: 17
+  completed_plans: 40
   percent: 75
 ---
 
@@ -21,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-09)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 20 — Video Storage & Retention
+**Current focus:** Phase 21 — settings, playback & alignment
 
 ## Current Position
 
-Phase: 20 (Video Storage & Retention) — EXECUTING
-Plan: 8 of 8
-Status: Phase complete — ready for verification
+Phase: 21
+Plan: Not started
+Status: Ready to plan
 Last activity: 2026-11-19
 
 ## Performance Metrics
 
 **Velocity (v1.0):**
 
-- Total plans completed: 28
+- Total plans completed: 36
 - Average duration: ~9 min
 - Total execution time: ~2.8 hours
 
