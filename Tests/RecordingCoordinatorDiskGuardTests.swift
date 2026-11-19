@@ -154,6 +154,30 @@ final class RecordingCoordinatorDiskGuardTests: XCTestCase {
         XCTAssertEqual(factory.makeCallCount, 0)
     }
 
+    /// IN-04: the default capacity provider measures the volume video is written to, not
+    /// a fixed directory. A video directory that cannot be measured fails the read.
+    func testDefaultCapacityProviderMeasuresTheVideoDirectory() async throws {
+        let unmeasurable = videoDir.appendingPathComponent("does-not-exist", isDirectory: true)
+        let coordinator = RecordingCoordinator(
+            database: db,
+            recorder: AudioRecorder(),
+            pipeline: pipeline,
+            detector: MeetingDetector(),
+            screenRecorderFactory: factory.factory,
+            videoInspector: MockVideoInspector(),
+            videoDirectory: unmeasurable
+        )
+
+        await coordinator.handle(.manualStart(title: "Unmeasurable Video Directory"))
+        await settle()
+
+        let error = await stateError(coordinator)
+        XCTAssertNotNil(error, "The capacity read must target the injected video directory")
+        let rows = try await meetingRowCount()
+        XCTAssertEqual(rows, 0)
+        XCTAssertEqual(factory.makeCallCount, 0)
+    }
+
     func testNilCapacityBlocksRecording() async throws {
         let coordinator = makeCoordinator(capacity: { nil }, withVideo: true)
 

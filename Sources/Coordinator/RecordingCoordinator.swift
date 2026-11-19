@@ -143,7 +143,7 @@ actor RecordingCoordinator {
         audioDeviceManager: AudioDeviceManager? = nil,
         liveTranscriber: LiveTranscriber? = nil,
         screenRecorderFactory: ScreenRecorderFactory? = nil,
-        availableDiskSpace: @escaping DiskSpaceProvider = RecordingCoordinator.systemAvailableDiskSpace,
+        availableDiskSpace: DiskSpaceProvider? = nil,
         videoInspector: any VideoFileInspecting = AVAssetVideoInspector(),
         videoDirectory: URL = AudioFileManager.audioDirectory
     ) {
@@ -154,7 +154,11 @@ actor RecordingCoordinator {
         self.audioDeviceManager = audioDeviceManager
         self.liveTranscriber = liveTranscriber
         self.screenRecorderFactory = screenRecorderFactory
-        self.availableDiskSpace = availableDiskSpace
+        // The default measures the volume video is written to, so the video threshold is
+        // never checked against a different volume than the one being filled.
+        self.availableDiskSpace = availableDiskSpace ?? {
+            try RecordingCoordinator.systemAvailableDiskSpace(at: videoDirectory)
+        }
         self.videoInspector = videoInspector
         self.videoDirectory = videoDirectory
     }
@@ -372,11 +376,12 @@ actor RecordingCoordinator {
     /// picker changes this one place.
     private static let videoPreset: ScreenRecorder.QualityPreset = .default
 
-    /// Default `DiskSpaceProvider`: the audio volume's capacity for important usage, which
-    /// counts purgeable space. A thrown read propagates and a missing value passes through
-    /// as `nil`.
-    static func systemAvailableDiskSpace() throws -> Int64? {
-        try AudioFileManager.audioDirectory.resourceValues(
+    /// Default `DiskSpaceProvider`, bound to the video directory in `init`: that volume's
+    /// capacity for important usage, which counts purgeable space. In production the
+    /// video directory is the audio directory, so one read covers both tiers. A thrown
+    /// read propagates and a missing value passes through as `nil`.
+    static func systemAvailableDiskSpace(at directory: URL) throws -> Int64? {
+        try directory.resourceValues(
             forKeys: [.volumeAvailableCapacityForImportantUsageKey]
         ).volumeAvailableCapacityForImportantUsage
     }
