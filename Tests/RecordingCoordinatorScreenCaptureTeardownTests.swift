@@ -185,6 +185,8 @@ final class RecordingCoordinatorScreenCaptureTeardownTests: CoordinatorTestCase 
     func testSlowVideoStopDoesNotBlockPipeline() async {
         let collector = VideoErrorCollector()
         factory.stopDelay = .seconds(30)
+        // The abandoned 30 s stop outlives this test; it must not fire a finalize into a later one.
+        factory.neverFinalize = true
 
         let coordinator = makeCoordinator()
         await coordinator.setOnVideoError { collector.append($0) }

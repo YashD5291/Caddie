@@ -475,6 +475,8 @@ final class RecordingCoordinatorVideoStorageTests: CoordinatorTestCase {
     /// row stays linked while the finalize is pending (no premature unlink).
     func testWedgedStopKeepsLinkUntilFinalize() async throws {
         factory.stopDelay = .seconds(30)
+        // The abandoned 30 s stop outlives this test; it must not fire a finalize into a later one.
+        factory.neverFinalize = true
         let coordinator = makeCoordinator()
         guard let id = await startMeeting(coordinator, title: "Wedged Stop") else {
             XCTFail("Expected the meeting to be recording")
