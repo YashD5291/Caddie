@@ -220,6 +220,31 @@ final class RecordingCoordinatorVideoStorageTests: XCTestCase {
         XCTAssertTrue(deleted, "An unreadable video must be deleted")
     }
 
+    /// WR-01: a probe failure that says nothing about the content (I/O, permissions, media
+    /// services) keeps the file, the link, and the anchor. Only a content verdict deletes.
+    func testInconclusiveInspectionKeepsVideoAndLink() async throws {
+        factory.createsFileOnStart = true
+        inspector.defaultResult = .inconclusive("NSPOSIXErrorDomain 5: Input/output error")
+        let coordinator = makeCoordinator()
+        guard let id = await startMeeting(coordinator, title: "Inconclusive") else {
+            XCTFail("Expected the meeting to be recording")
+            return
+        }
+        let linked = try await waitUntil { try await self.isLinked(id) }
+        XCTAssertTrue(linked)
+
+        await coordinator.handle(.manualStop)
+
+        let inspected = await waitUntil { self.inspector.inspectCallCount == 1 }
+        XCTAssertTrue(inspected, "Finalize must trigger exactly one inspection")
+        await settle(.milliseconds(300))
+
+        let meeting = try await fetchMeeting(id)
+        XCTAssertEqual(meeting?.videoFile, "\(id).mov", "An inconclusive probe must keep the link")
+        XCTAssertNotNil(meeting?.videoStartOffset, "An inconclusive probe must keep the anchor")
+        XCTAssertTrue(fileExists(videoURL(id)), "An inconclusive probe must keep the file")
+    }
+
     /// End-to-end D-07 with the production inspector: the 0-byte file a stop before the
     /// first written frame leaves behind is deleted and unlinked.
     func testRealInspectorDeletesZeroByteVideo() async throws {

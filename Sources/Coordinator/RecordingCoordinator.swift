@@ -715,6 +715,11 @@ actor RecordingCoordinator {
         case .unreadable(let reason):
             await discardUnusableVideo(meetingId: meetingId, url: url, linked: linked, reason: reason)
             return false
+        case .inconclusive(let reason):
+            // Not a D-07 verdict: the probe failed for a reason unrelated to the content,
+            // so deleting could destroy a good recording.
+            logger.error("Could not verify finalized video \(url.lastPathComponent) for meeting \(meetingId); keeping the file and its link: \(reason)")
+            return linked
         case .missing:
             logger.warning("Finalized video \(url.lastPathComponent) for meeting \(meetingId) is missing from disk")
             if linked {

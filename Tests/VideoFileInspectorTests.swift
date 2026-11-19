@@ -119,6 +119,50 @@ final class VideoFileInspectorTests: XCTestCase {
         assertUnreadable(result)
     }
 
+    /// WR-01: a permission error says nothing about the file's content, so the file must
+    /// be kept rather than judged unusable (measured: NSCocoaErrorDomain 257).
+    func testPermissionDeniedFileIsInconclusive() async throws {
+        let url = tempDir.appendingPathComponent("locked.mov")
+        try makeGarbageFile(at: url, size: 4096)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+
+        let result = await AVAssetVideoInspector().inspect(url)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        assertInconclusive(result)
+    }
+
+    // MARK: - Error classification (WR-01)
+
+    /// Only a verdict about the file's content may delete it (D-07). Measured on macOS:
+    /// a 0-byte file, random bytes, all-zero bytes, and a sessionless writer output all
+    /// fail with AVFoundationErrorDomain -11829 (`fileFailedToParse`).
+    func testContentErrorsAreUnreadable() {
+        for code in [AVError.Code.fileFormatNotRecognized, .fileFailedToParse] {
+            let error = NSError(domain: AVFoundationErrorDomain, code: code.rawValue)
+
+            assertUnreadable(AVAssetVideoInspector.classify(error))
+        }
+    }
+
+    /// A failure that says nothing about the content (I/O, permissions, media services,
+    /// cancellation) must keep the file, so it is never `.unreadable`.
+    func testNonContentErrorsAreInconclusive() {
+        let mediaServicesWereReset = -11819  // AVError.Code.mediaServicesWereReset is unavailable on macOS
+        let errors: [Error] = [
+            NSError(domain: NSPOSIXErrorDomain, code: Int(EIO)),
+            NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES)),
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError),
+            NSError(domain: AVFoundationErrorDomain, code: mediaServicesWereReset),
+            NSError(domain: AVFoundationErrorDomain, code: AVError.Code.unknown.rawValue),
+            CancellationError()
+        ]
+
+        for error in errors {
+            assertInconclusive(AVAssetVideoInspector.classify(error))
+        }
+    }
+
     func testInspectionNeverModifiesTheFile() async throws {
         let playable = tempDir.appendingPathComponent("playable.mov")
         let empty = tempDir.appendingPathComponent("empty.mov")
@@ -158,6 +202,15 @@ final class VideoFileInspectorTests: XCTestCase {
             return
         }
         XCTAssertFalse(message.isEmpty, "The unreadable verdict must carry the error", file: file, line: line)
+    }
+
+    private func assertInconclusive(_ result: VideoInspectionResult,
+                                    file: StaticString = #filePath, line: UInt = #line) {
+        guard case .inconclusive(let message) = result else {
+            XCTFail("Expected .inconclusive, got \(result)", file: file, line: line)
+            return
+        }
+        XCTAssertFalse(message.isEmpty, "The inconclusive verdict must carry the error", file: file, line: line)
     }
 
     private func fileSize(at url: URL) throws -> Int {

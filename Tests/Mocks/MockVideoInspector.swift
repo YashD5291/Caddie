@@ -2,8 +2,8 @@ import Foundation
 @testable import Caddie
 
 /// Scripted stand-in for `AVAssetVideoInspector`. Returns `defaultResult` for any file
-/// without a per-file script, so coordinator tests can force a usable, unreadable, or
-/// missing verdict without writing a real `.mov`.
+/// without a per-file script, so coordinator tests can force a usable, unreadable,
+/// inconclusive, or missing verdict without writing a real `.mov`.
 ///
 /// Thread-safety: the coordinator calls `inspect` from its actor while the test body
 /// reads the recorded calls from the main actor. Every piece of mutable state is
