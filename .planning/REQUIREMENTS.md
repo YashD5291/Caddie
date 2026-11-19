@@ -21,8 +21,8 @@ Requirements for optional screen video capture during meeting recordings. Each m
 
 - [x] **STOR-01**: Video is stored locally alongside the meeting's audio and linked to the meeting record (nullable `video_file` column; never in FTS5)
 - [x] **STOR-02**: Deleting a meeting deletes its video file along with its audio
-- [x] **STOR-03**: Recording is blocked pre-start when disk space is insufficient for video (disk guard raised above the current 500 MB when video is enabled)
-- [x] **STOR-04**: Video/audio timeline alignment metadata (host-clock anchor) is persisted with the meeting so playback position maps to transcript time
+- [x] **STOR-03**: The disk guard accounts for video. Below 500 MB free, recording is blocked pre-start (unchanged). When screen recording is enabled and free space is below the video threshold (500 MB + about 2 hours at the active preset's bitrate cap), the video leg is blocked pre-start and the meeting records audio only, with the reason surfaced
+- [x] **STOR-04**: Video/audio timeline alignment metadata (host-clock anchor) is persisted with the meeting so playback position maps to transcript time (engine anchor: Phase 18; persisted with the meeting: Phase 20)
 
 ### Playback
 
@@ -79,12 +79,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VID-05 | Phase 18 | Complete |
 | VID-06 | Phase 18 | Complete |
 | VID-07 | Phase 18 | Complete |
-| STOR-04 | Phase 18 | Complete |
 | VID-03 | Phase 19 | Complete |
 | VID-04 | Phase 19 | Complete |
 | STOR-01 | Phase 20 | Complete |
 | STOR-02 | Phase 20 | Complete |
 | STOR-03 | Phase 20 | Complete |
+| STOR-04 | Phase 18 (engine anchor), Phase 20 (persisted with the meeting) | Complete |
 | VID-01 | Phase 21 | Pending |
 | VID-02 | Phase 21 | Pending |
 | PLAY-01 | Phase 21 | Pending |

@@ -76,13 +76,14 @@
 
 **Goal**: Video files are linked to their meeting, cleaned up on deletion, and guarded against disk exhaustion — no orphans, no FTS5 contamination.
 **Depends on**: Phase 19
-**Requirements**: STOR-01, STOR-02, STOR-03
+**Requirements**: STOR-01, STOR-02, STOR-03, STOR-04
 **Success Criteria** (what must be TRUE):
 
   1. A recorded meeting's row references its video via a nullable `video_file` column that is absent from the FTS5 index
   2. Deleting a meeting removes both its audio and video files from disk
-  3. Starting a recording is blocked pre-start when free disk space is below the raised video threshold (above the current 500 MB)
+  3. With screen recording enabled, starting a recording checks free space against a raised video threshold (500 MB + about 2 hours of video at the active preset): below 500 MB recording is blocked pre-start as before, and below the video threshold the video leg is blocked pre-start and the meeting records audio only, with the reason shown
   4. Meetings recorded audio-only leave `video_file` null with no storage side effects
+  5. A meeting with a usable video stores its video start offset (host-clock anchor) on its row, so playback position maps to transcript time (STOR-04 storage leg)
 
 **Plans**: 8 plans
 
