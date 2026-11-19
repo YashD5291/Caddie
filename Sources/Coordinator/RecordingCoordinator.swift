@@ -561,13 +561,7 @@ actor RecordingCoordinator {
             Task { await self?.handleVideoStreamStopped(error) }
         }
 
-        // Created in actor context, so it inherits this actor's isolation, like
-        // videoStartTask. Deliberately neither stored nor awaited by teardown:
-        // pipeline.enqueue must never wait on finalize or inspection.
-        Task {
-            await self.persistVideoLifecycle(meetingId: meetingId, url: url,
-                                             audioStartTicks: audioStartTicks, events: events)
-        }
+        persistVideoLifecycle(meetingId: meetingId, url: url, audioStartTicks: audioStartTicks, events: events)
 
         // Publish the context BEFORE starting, so a stream death reported during the
         // start call still finds the in-flight capture.
@@ -628,22 +622,30 @@ actor RecordingCoordinator {
     /// Every handler takes this meeting's id and url explicitly and never reads the
     /// in-flight context: a late finalize can land after teardown cleared it, or after
     /// meeting #2 started, and must still reconcile its own row (D-06).
+    ///
+    /// The consuming task is deliberately neither stored nor awaited by teardown:
+    /// pipeline.enqueue must never wait on finalize or inspection. It holds the coordinator
+    /// weakly while it waits for the next event, so a stream that never finishes (quit, a
+    /// wedged finalize) pins only the task.
     private func persistVideoLifecycle(meetingId: String, url: URL, audioStartTicks: UInt64,
-                                       events: AsyncStream<VideoEvent>) async {
-        var linked = false
-        var offset: Double?
-        for await event in events {
-            switch event {
-            case .firstFrame(let ticks):
-                let firstFrameOffset = Self.videoStartOffset(audioStartTicks: audioStartTicks,
-                                                             firstFrameTicks: ticks,
-                                                             timebase: Self.hostTimebase())
-                offset = firstFrameOffset
-                logger.info("Video anchor for \(meetingId): audioTicks=\(audioStartTicks) firstFrameTicks=\(ticks) offset=\(firstFrameOffset, format: .fixed(precision: 3))s")
-                linked = await linkVideo(meetingId: meetingId, fileName: url.lastPathComponent,
-                                         offset: firstFrameOffset)
-            case .finalized:
-                await reconcileFinalizedVideo(meetingId: meetingId, url: url, linked: linked, offset: offset)
+                                       events: AsyncStream<VideoEvent>) {
+        Task { [weak self] in
+            var linked = false
+            var offset: Double?
+            for await event in events {
+                guard let self else { return }
+                switch event {
+                case .firstFrame(let ticks):
+                    let firstFrameOffset = Self.videoStartOffset(audioStartTicks: audioStartTicks,
+                                                                 firstFrameTicks: ticks,
+                                                                 timebase: Self.hostTimebase())
+                    offset = firstFrameOffset
+                    self.logger.info("Video anchor for \(meetingId): audioTicks=\(audioStartTicks) firstFrameTicks=\(ticks) offset=\(firstFrameOffset, format: .fixed(precision: 3))s")
+                    linked = await self.linkVideo(meetingId: meetingId, fileName: url.lastPathComponent,
+                                                  offset: firstFrameOffset)
+                case .finalized:
+                    await self.reconcileFinalizedVideo(meetingId: meetingId, url: url, linked: linked, offset: offset)
+                }
             }
         }
     }
