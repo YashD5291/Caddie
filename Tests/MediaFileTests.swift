@@ -106,7 +106,125 @@ final class MediaFileTests: XCTestCase {
         XCTAssertEqual(AudioFileManager.videoPath(for: "x"), AudioFileManager.audioDirectory.appendingPathComponent("x.mov"))
     }
 
+    // MARK: - cleanupOrphanedVideos
+
+    func testSweepDeletesOnlyRowlessMovFiles() throws {
+        let keepMov = try touch("keep.mov", in: tempDir)
+        let orphanMov = try touch("orphan.mov", in: tempDir)
+        let orphanWav = try touch("orphan.wav", in: tempDir)
+        let orphanM4a = try touch("orphan.m4a", in: tempDir)
+
+        AudioFileManager.cleanupOrphanedVideos(in: tempDir) { ["keep"] }
+
+        XCTAssertFalse(exists(orphanMov), "A .mov with no meeting row must be deleted")
+        XCTAssertTrue(exists(keepMov))
+        XCTAssertTrue(exists(orphanWav), "The sweep only touches .mov files")
+        XCTAssertTrue(exists(orphanM4a), "The sweep only touches .mov files")
+    }
+
+    func testSweepMatchesMovExtensionCaseInsensitively() throws {
+        let keepMov = try touch("keep.mov", in: tempDir)
+        let upperMov = try touch("ORPHAN2.MOV", in: tempDir)
+
+        AudioFileManager.cleanupOrphanedVideos(in: tempDir) { ["keep"] }
+
+        XCTAssertFalse(exists(upperMov))
+        XCTAssertTrue(exists(keepMov))
+    }
+
+    func testSweepSkipsWhenMeetingIdReadFails() throws {
+        let keepMov = try touch("keep.mov", in: tempDir)
+        let orphanMov = try touch("orphan.mov", in: tempDir)
+
+        AudioFileManager.cleanupOrphanedVideos(in: tempDir) { throw SweepTestError() }
+
+        XCTAssertTrue(exists(keepMov), "A failed read must never be treated as 'no meetings'")
+        XCTAssertTrue(exists(orphanMov), "A failed read must never be treated as 'no meetings'")
+    }
+
+    func testSweepSkipsWhenMeetingSetIsEmpty() throws {
+        let firstMov = try touch("first.mov", in: tempDir)
+        let secondMov = try touch("second.mov", in: tempDir)
+        let wav = try touch("first.wav", in: tempDir)
+
+        AudioFileManager.cleanupOrphanedVideos(in: tempDir) { [] }
+
+        XCTAssertTrue(exists(firstMov), "An empty meetings table must never wipe every video")
+        XCTAssertTrue(exists(secondMov), "An empty meetings table must never wipe every video")
+        XCTAssertTrue(exists(wav))
+    }
+
+    func testSweepDoesNotReadDatabaseWhenNoVideosExist() throws {
+        let wav = try touch("orphan.wav", in: tempDir)
+        var called = false
+
+        AudioFileManager.cleanupOrphanedVideos(in: tempDir) {
+            called = true
+            return ["keep"]
+        }
+
+        XCTAssertFalse(called, "With no .mov files the meeting ids must not be read")
+        XCTAssertTrue(exists(wav))
+    }
+
+    func testSweepNeverDeletesFileCreatedAfterListing() throws {
+        let keepMov = try touch("keep.mov", in: tempDir)
+        var lateMov: URL?
+
+        AudioFileManager.cleanupOrphanedVideos(in: tempDir) {
+            lateMov = try touch("late.mov", in: tempDir)
+            return ["keep"]
+        }
+
+        let late = try XCTUnwrap(lateMov, "The ID source must run when videos exist")
+        XCTAssertTrue(exists(late), "Files must be listed before ids are read")
+        XCTAssertTrue(exists(keepMov))
+    }
+
+    func testSweepIgnoresDirectories() throws {
+        let keepMov = try touch("keep.mov", in: tempDir)
+        let folder = tempDir.appendingPathComponent("folder.mov", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let inner = try touch("inner.txt", in: folder)
+
+        AudioFileManager.cleanupOrphanedVideos(in: tempDir) { ["keep"] }
+
+        XCTAssertTrue(exists(folder), "Only regular files are sweep candidates")
+        XCTAssertTrue(exists(inner))
+        XCTAssertTrue(exists(keepMov))
+    }
+
+    func testSweepToleratesMissingDirectory() {
+        let missingDir = tempDir.appendingPathComponent("does-not-exist", isDirectory: true)
+        var called = false
+
+        AudioFileManager.cleanupOrphanedVideos(in: missingDir) {
+            called = true
+            return ["keep"]
+        }
+
+        XCTAssertFalse(called, "An unlistable directory must skip the sweep before reading ids")
+    }
+
+    // MARK: - AppDatabase.meetingIds
+
+    func testMeetingIdsReturnsEveryRow() throws {
+        let db = try AppDatabase(inMemory: true)
+        XCTAssertEqual(try db.meetingIds(), [])
+
+        var first = Meeting(meetingId: "meeting-a", title: "Standup", date: "2026-11-19", startTime: "2026-11-19T09:00:00Z")
+        var second = Meeting(meetingId: "meeting-b", title: "Review", date: "2026-11-19", startTime: "2026-11-19T14:00:00Z")
+        try db.dbWriter.write { dbConn in
+            try first.insert(dbConn)
+            try second.insert(dbConn)
+        }
+
+        XCTAssertEqual(try db.meetingIds(), ["meeting-a", "meeting-b"])
+    }
+
     // MARK: - Helpers
+
+    private struct SweepTestError: Error {}
 
     @discardableResult
     private func touch(_ name: String, in dir: URL) throws -> URL {
