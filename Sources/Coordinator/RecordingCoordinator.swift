@@ -659,14 +659,20 @@ actor RecordingCoordinator {
     }
 
     /// Links the video and its anchor in one targeted write (D-05, D-08). Returns whether
-    /// the write succeeded. Never a full-record update, which could clobber other columns.
+    /// the row was linked: false when the write fails or the meeting row no longer exists.
+    /// Never a full-record update, which could clobber other columns.
     private func linkVideo(meetingId: String, fileName: String, offset: Double?) async -> Bool {
         do {
-            try await database.dbWriter.write { dbConn in
+            let changedRows = try await database.dbWriter.write { dbConn -> Int in
                 try dbConn.execute(
                     sql: "UPDATE meetings SET video_file = ?, video_start_offset = ? WHERE meeting_id = ?",
                     arguments: [fileName, offset, meetingId]
                 )
+                return dbConn.changesCount
+            }
+            guard changedRows > 0 else {
+                logger.warning("Meeting \(meetingId) no longer exists; video \(fileName) not linked")
+                return false
             }
             logger.info("Linked video \(fileName) to meeting \(meetingId)")
             return true
@@ -695,9 +701,18 @@ actor RecordingCoordinator {
     /// Runs only on the engine's finalize signal. Finalize rewrites the file in place,
     /// so inspecting or deleting any earlier would judge, or destroy, a file mid-rewrite
     /// (D-13).
+    ///
+    /// The meeting can be deleted before its finalize lands (Delete works at every status,
+    /// and `stop()` returns before `finishWriting`). Its file is then removed whatever the
+    /// verdict, because finalize may have written it back after `deleteMedia` ran.
     private func reconcileFinalizedVideo(meetingId: String, url: URL, linked: Bool,
                                          offset: Double?) async -> Bool {
         let result = await videoInspector.inspect(url)
+        if await isMeetingDeleted(meetingId) {
+            logger.warning("Meeting \(meetingId) was deleted before its video finalized; removing \(url.lastPathComponent)")
+            AudioFileManager.removeFileIfPresent(at: url)
+            return false
+        }
         switch result {
         case .inspected(let inspection) where inspection.isUsable:
             guard linked else {
@@ -725,6 +740,20 @@ actor RecordingCoordinator {
             if linked {
                 await unlinkVideo(meetingId: meetingId)
             }
+            return false
+        }
+    }
+
+    /// True only when the read succeeds and finds no row. A failed read logs an error and
+    /// returns false, so it is never mistaken for a deleted meeting.
+    private func isMeetingDeleted(_ meetingId: String) async -> Bool {
+        do {
+            let rowCount = try await database.dbWriter.read { dbConn in
+                try Meeting.filter(Column("meeting_id") == meetingId).fetchCount(dbConn)
+            }
+            return rowCount == 0
+        } catch {
+            logger.error("Could not confirm meeting \(meetingId) still exists: \(error.localizedDescription)")
             return false
         }
     }

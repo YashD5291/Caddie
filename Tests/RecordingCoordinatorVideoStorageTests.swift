@@ -572,6 +572,31 @@ final class RecordingCoordinatorVideoStorageTests: XCTestCase {
         let meeting = try await fetchMeeting(id)
         XCTAssertNil(meeting, "No write may recreate the deleted row")
     }
+
+    /// WR-02: Delete works at every status and finalize lands after stop, so a meeting can
+    /// be deleted before its video finalizes. Its usable video must not stay on disk.
+    func testUsableVideoOfDeletedMeetingIsRemovedOnFinalize() async throws {
+        factory.createsFileOnStart = true
+        let coordinator = makeCoordinator()
+        guard let id = await startMeeting(coordinator, title: "Deleted Before Finalize") else {
+            XCTFail("Expected the meeting to be recording")
+            return
+        }
+        let linked = try await waitUntil { try await self.isLinked(id) }
+        XCTAssertTrue(linked)
+
+        let deletedRows = try await db.dbWriter.write { dbConn in
+            try Meeting.filter(Column("meeting_id") == id).deleteAll(dbConn)
+        }
+        XCTAssertEqual(deletedRows, 1)
+
+        await coordinator.handle(.manualStop)
+
+        let removed = await waitUntil { !self.fileExists(self.videoURL(id)) }
+        XCTAssertTrue(removed, "A deleted meeting's usable video must not stay on disk")
+        let meeting = try await fetchMeeting(id)
+        XCTAssertNil(meeting, "No write may recreate the deleted row")
+    }
 }
 
 // MARK: - Test Helpers
