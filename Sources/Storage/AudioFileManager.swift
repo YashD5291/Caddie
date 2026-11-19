@@ -352,9 +352,6 @@ enum AudioFileManager {
     /// real orphan never has audio: older versions deleted a meeting's audio and left its
     /// video. A lost, recreated, or stale-restored database leaves the audio in place, so
     /// that video is kept (D-14).
-    ///
-    /// Unlike the Settings orphaned-WAV finder, this never treats every file with the extension as an
-    /// orphan: only regular `.mov` files without a meeting row and without audio are removed.
     static func cleanupOrphanedVideos(in directory: URL = audioDirectory, knownMeetingIds: () throws -> Set<String>) {
         let contents: [URL]
         do {
@@ -383,29 +380,29 @@ enum AudioFileManager {
             return
         }
 
-        let orphans = videos.filter { video in
+        let listedNames = Set(contents.map(\.lastPathComponent))
+        var removedCount = 0
+        for video in videos {
             let stem = video.deletingPathExtension().lastPathComponent
-            guard !ids.contains(stem) else { return false }
-            guard !hasSiblingAudio(stem: stem, in: directory) else {
+            guard !ids.contains(stem) else { continue }
+            guard !hasSiblingAudio(stem: stem, in: directory, listedNames: listedNames) else {
                 logger.warning("Keeping row-less video \(video.lastPathComponent): its audio still exists, so the database may be stale")
-                return false
+                continue
             }
-            return true
-        }
-        for orphan in orphans {
-            logger.info("Removing orphaned video \(orphan.lastPathComponent)")
-            removeFileIfPresent(at: orphan)
+            logger.info("Removing orphaned video \(video.lastPathComponent)")
+            removeFileIfPresent(at: video)
+            removedCount += 1
         }
 
-        if !orphans.isEmpty {
-            logger.info("Cleaned up \(orphans.count) orphaned video file(s)")
+        if removedCount > 0 {
+            logger.info("Cleaned up \(removedCount) orphaned video file(s)")
         }
     }
 
-    /// True when the meeting's `.m4a` or `.wav` is still in `directory`.
-    private static func hasSiblingAudio(stem: String, in directory: URL) -> Bool {
+    /// True when the meeting's `.m4a` or `.wav` is among the names listed from `directory`.
+    private static func hasSiblingAudio(stem: String, in directory: URL, listedNames: Set<String>) -> Bool {
         [alacPath(for: stem, in: directory), wavPath(for: stem, in: directory)].contains { url in
-            FileManager.default.fileExists(atPath: url.path)
+            listedNames.contains(url.lastPathComponent)
         }
     }
 
