@@ -61,5 +61,18 @@ enum Migrations {
                 END
                 """)
         }
+
+        // ADD COLUMN only, so no table rebuild. meetings_fts and its three triggers name
+        // title, transcript, app explicitly, so the new columns are never indexed.
+        // video_file holds the filename only ("<meetingId>.mov", like audio_file).
+        // video_start_offset holds seconds from the audio start to the first video frame
+        // (movie time 0), so video time = transcript time - offset.
+        // Both are NULL whenever no usable video is linked.
+        migrator.registerMigration("v2_add_video_columns") { db in
+            try db.alter(table: "meetings") { t in
+                t.add(column: "video_file", .text)
+                t.add(column: "video_start_offset", .double)
+            }
+        }
     }
 }
