@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
 status: executing
-stopped_at: Completed 20-01-PLAN.md
-last_updated: "2026-11-19T13:12:29.853Z"
+stopped_at: Completed 20-02-PLAN.md
+last_updated: "2026-11-19T13:22:32.064Z"
 last_activity: 2026-11-19
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 17
-  completed_plans: 10
+  completed_plans: 11
   percent: 50
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 20 (Video Storage & Retention) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-11-19
 
@@ -79,6 +79,8 @@ Recent decisions affecting current work:
 - [Phase 19]: 19-04: The video warning renders in the .recording menu-bar branch too (not just .idle) — a capture that dies mid-meeting would otherwise be invisible for the rest of the meeting
 - [Phase 20]: 20-01: Video anchor persisted as a single video_start_offset DOUBLE (seconds, first video frame minus audio start; video time = transcript time - offset); raw host ticks not stored
 - [Phase 20]: 20-01: v2_add_video_columns is ADD COLUMN only; v1, meetings_fts and its triggers untouched, so video_file is never indexed (proven by negative search + exact FTS column-list test)
+- [Phase 20]: 20-02: Media deletion is keyed on meeting id, never on video_file, so Phase-19-era and unverified videos (NULL column) are still removed with their meeting
+- [Phase 20]: 20-02: The launch orphan sweep lists .mov regular files before reading meeting ids and skips entirely on an ID read failure or an empty meeting set; it runs synchronously in initialize() before RecordingCoordinator exists
 
 ### Pending Todos
 
@@ -110,11 +112,12 @@ Recent decisions affecting current work:
 | Phase 19 P03 | 16 min | 2 tasks | 2 files |
 | Phase 19 P04 | 12 min | 2 tasks | 4 files |
 | Phase 20 P01 | 7 min | 2 tasks | 4 files |
+| Phase 20 P02 | 7 min | 2 tasks | 5 files |
 
 ## Session Continuity
 
-Last session: 2026-11-19T13:12:29.846Z
+Last session: 2026-11-19T13:22:32.056Z
 Last activity: 2026-07-09
-Stopped at: Completed 20-01-PLAN.md
+Stopped at: Completed 20-02-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 18`
