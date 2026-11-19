@@ -8,73 +8,21 @@ import GRDB
 /// records audio only, with the reason on the non-fatal video channel.
 ///
 /// Free space comes from an injected provider, so no test depends on the developer's
-/// real free space, and video files live in a per-test temp directory, so no test
-/// touches the user's real media (D-15). Video is a `MockScreenRecorder` (no TCC grant,
-/// no screen capture); audio is a real `AudioRecorder`, the same rig as the
-/// screen-capture suites.
-@MainActor
-final class RecordingCoordinatorDiskGuardTests: XCTestCase {
-    var db: AppDatabase!
-    var pipeline: TranscriptionPipeline!
-    var factory: MockScreenRecorderFactory!
-    var videoDir: URL!
+/// real free space. The fixture (`CoordinatorTestCase`) injects a temp `videoDir` and
+/// mock engines, so no test touches the user's real media (D-15).
+final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
 
     nonisolated private static let fourHundredMiB: Int64 = 419_430_400
     nonisolated private static let sixHundredMiB: Int64 = 629_145_600
     nonisolated private static let oneGB: Int64 = 1_000_000_000
 
-    override func setUpWithError() throws {
-        db = try AppDatabase(inMemory: true)
-        pipeline = TranscriptionPipeline(asr: MockASREngine(), diarization: MockDiarizationEngine())
-        factory = MockScreenRecorderFactory()
-        videoDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: videoDir, withIntermediateDirectories: true)
-    }
-
-    override func tearDownWithError() throws {
-        if let videoDir, FileManager.default.fileExists(atPath: videoDir.path) {
-            try FileManager.default.removeItem(at: videoDir)
-        }
-        db = nil; pipeline = nil; factory = nil; videoDir = nil
-    }
-
     // MARK: - Helpers
-
-    private func makeCoordinator(
-        capacity: @escaping RecordingCoordinator.DiskSpaceProvider,
-        withVideo: Bool
-    ) -> RecordingCoordinator {
-        RecordingCoordinator(
-            database: db,
-            recorder: AudioRecorder(),
-            pipeline: pipeline,
-            detector: MeetingDetector(),
-            audioDeviceManager: nil,
-            liveTranscriber: nil,
-            screenRecorderFactory: withVideo ? factory.factory : nil,
-            availableDiskSpace: capacity,
-            videoInspector: MockVideoInspector(),
-            videoDirectory: videoDir
-        )
-    }
 
     /// Wires both callbacks into `log` so a test can read state changes, video messages,
     /// and their relative order.
     private func attach(_ log: DiskGuardEventLog, to coordinator: RecordingCoordinator) async {
         await coordinator.setOnStateChange { log.append(.state($0)) }
         await coordinator.setOnVideoError { log.append(.videoError($0)) }
-    }
-
-    /// Lets the unstructured video-start Task (and any callback hop) land.
-    private func settle() async {
-        try? await Task.sleep(for: .milliseconds(150))
-    }
-
-    private func recordingMeetingId(_ coordinator: RecordingCoordinator) async -> String? {
-        let state = await coordinator.state
-        guard case .recording(let meetingId) = state else { return nil }
-        return meetingId
     }
 
     private func stateError(_ coordinator: RecordingCoordinator) async -> Error? {
@@ -164,7 +112,7 @@ final class RecordingCoordinatorDiskGuardTests: XCTestCase {
             pipeline: pipeline,
             detector: MeetingDetector(),
             screenRecorderFactory: factory.factory,
-            videoInspector: MockVideoInspector(),
+            videoInspector: inspector,
             videoDirectory: unmeasurable
         )
 
@@ -204,9 +152,7 @@ final class RecordingCoordinatorDiskGuardTests: XCTestCase {
             XCTFail("Video headroom must never block audio, got \(state)")
             return
         }
-        let meeting = try await db.dbWriter.read { dbConn in
-            try Meeting.filter(Column("meeting_id") == meetingId).fetchOne(dbConn)
-        }
+        let meeting = try await fetchMeeting(meetingId)
         XCTAssertEqual(meeting?.status, .recording, "The audio recording must carry on")
         XCTAssertEqual(factory.makeCallCount, 0, "Video must never start below the threshold")
         let active = await coordinator.isVideoActive

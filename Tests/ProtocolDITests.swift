@@ -90,7 +90,7 @@ final class ProtocolDITests: XCTestCase {
     func testMockSimulatedFinalizeIsNotRepeatedByStop() async throws {
         let recorder = MockScreenRecorder()
         let log = FinalizeLog()
-        recorder.onFinalized = { log.record(stopCount: 0) }
+        recorder.onFinalized = { log.record() }
 
         try await recorder.start(target: .display(nil), preset: .compact, outputURL: movURL())
         // Stream death mid-meeting finalizes before teardown; the later stop() must not
@@ -109,7 +109,7 @@ final class ProtocolDITests: XCTestCase {
         let recorder = MockScreenRecorder()
         recorder.neverFinalize = true
         let log = FinalizeLog()
-        recorder.onFinalized = { log.record(stopCount: 0) }
+        recorder.onFinalized = { log.record() }
 
         try await recorder.start(target: .display(nil), preset: .compact, outputURL: movURL())
         await recorder.stop()
@@ -125,7 +125,7 @@ final class ProtocolDITests: XCTestCase {
         let finalized = expectation(description: "late onFinalized")
         finalized.assertForOverFulfill = true
         recorder.onFinalized = {
-            log.record(stopCount: 0)
+            log.record()
             finalized.fulfill()
         }
 
@@ -142,7 +142,7 @@ final class ProtocolDITests: XCTestCase {
         let recorder = MockScreenRecorder()
         recorder.startError = MockScreenRecorderError(message: "TCC denied")
         let log = FinalizeLog()
-        recorder.onFinalized = { log.record(stopCount: 0) }
+        recorder.onFinalized = { log.record() }
 
         do {
             try await recorder.start(target: .display(nil), preset: .compact, outputURL: movURL())
@@ -193,19 +193,4 @@ final class ProtocolDITests: XCTestCase {
     private func movURL() -> URL {
         tempDir.appendingPathComponent("\(UUID().uuidString).mov")
     }
-}
-
-/// Records each `onFinalized` fire with the mock's stop count at that moment. The callback
-/// can arrive from an unstructured `Task` while the test body reads from the test executor,
-/// so the log is lock-guarded.
-private final class FinalizeLog: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _stopCountsAtFire: [Int] = []
-
-    func record(stopCount: Int) {
-        lock.withLock { _stopCountsAtFire.append(stopCount) }
-    }
-
-    var stopCountsAtFire: [Int] { lock.withLock { _stopCountsAtFire } }
-    var count: Int { stopCountsAtFire.count }
 }

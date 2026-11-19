@@ -23,39 +23,39 @@ final class WriterSinkFinalizeTests: XCTestCase {
 
     func testStoppedFinalizeFiresOnceAfterFinishWriting() async throws {
         let (writer, input) = try makeWriter(startWriting: true)
-        let counter = FinalizeCounter()
+        let log = FinalizeLog()
         let finalized = expectation(description: "onFinalized")
         finalized.assertForOverFulfill = true
-        let sink = makeSink(writer: writer, input: input, counter: counter, expectation: finalized)
+        let sink = makeSink(writer: writer, input: input, log: log, expectation: finalized)
 
         sink.finalize(reason: .stopped)
 
         await fulfillment(of: [finalized], timeout: 5)
         XCTAssertNotEqual(writer.status, .writing, "onFinalized must arrive only after finishWriting completed")
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(counter.count, 1)
+        XCTAssertEqual(log.count, 1)
     }
 
     func testStreamErrorFinalizeFiresOnce() async throws {
         let (writer, input) = try makeWriter(startWriting: true)
-        let counter = FinalizeCounter()
+        let log = FinalizeLog()
         let finalized = expectation(description: "onFinalized")
         finalized.assertForOverFulfill = true
-        let sink = makeSink(writer: writer, input: input, counter: counter, expectation: finalized)
+        let sink = makeSink(writer: writer, input: input, log: log, expectation: finalized)
 
         sink.finalize(reason: .streamError)
 
         await fulfillment(of: [finalized], timeout: 5)
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(counter.count, 1)
+        XCTAssertEqual(log.count, 1)
     }
 
     func testDoubleFinalizeFiresOnce() async throws {
         let (writer, input) = try makeWriter(startWriting: true)
-        let counter = FinalizeCounter()
+        let log = FinalizeLog()
         let finalized = expectation(description: "onFinalized")
         finalized.assertForOverFulfill = true
-        let sink = makeSink(writer: writer, input: input, counter: counter, expectation: finalized)
+        let sink = makeSink(writer: writer, input: input, log: log, expectation: finalized)
 
         // Stream death followed by teardown stops: the idempotency guard lets only the
         // first pass reach a terminal exit, so a waiter sees exactly one signal (D-06).
@@ -65,22 +65,22 @@ final class WriterSinkFinalizeTests: XCTestCase {
 
         await fulfillment(of: [finalized], timeout: 5)
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(counter.count, 1)
+        XCTAssertEqual(log.count, 1)
     }
 
     func testFinalizeWithWriterNotWritingStillFires() async throws {
         let (writer, input) = try makeWriter(startWriting: false)
         XCTAssertEqual(writer.status, .unknown)
-        let counter = FinalizeCounter()
+        let log = FinalizeLog()
         let finalized = expectation(description: "onFinalized")
         finalized.assertForOverFulfill = true
-        let sink = makeSink(writer: writer, input: input, counter: counter, expectation: finalized)
+        let sink = makeSink(writer: writer, input: input, log: log, expectation: finalized)
 
         sink.finalize(reason: .stopped)
 
         await fulfillment(of: [finalized], timeout: 5)
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(counter.count, 1, "The not-writing early return must still release a waiter")
+        XCTAssertEqual(log.count, 1, "The not-writing early return must still release a waiter")
     }
 
     func testNilOnFinalizedIsSafe() async throws {
@@ -126,7 +126,7 @@ final class WriterSinkFinalizeTests: XCTestCase {
 
     private func makeSink(writer: AVAssetWriter,
                           input: AVAssetWriterInput,
-                          counter: FinalizeCounter,
+                          log: FinalizeLog,
                           expectation: XCTestExpectation) -> WriterSink {
         WriterSink(
             writer: writer,
@@ -135,23 +135,9 @@ final class WriterSinkFinalizeTests: XCTestCase {
             onFirstFrameHostTime: nil,
             onStreamStopped: nil,
             onFinalized: {
-                counter.increment()
+                log.record()
                 expectation.fulfill()
             }
         )
     }
-}
-
-/// Counts `onFinalized` fires. The callback arrives on AVFoundation's completion queue or
-/// the writer queue while the test body reads from the test executor, so the count is
-/// lock-guarded.
-private final class FinalizeCounter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _count = 0
-
-    func increment() {
-        lock.withLock { _count += 1 }
-    }
-
-    var count: Int { lock.withLock { _count } }
 }
