@@ -35,10 +35,7 @@ final class ScreenRecorder {
     /// Fired if the stream dies (`didStopWithError`). `@Sendable`: arrives on SCK's queue.
     var onStreamStopped: (@Sendable (Error?) -> Void)?
 
-    /// Fired exactly once per recording after `finishWriting` completes, or immediately
-    /// when the writer was not writing. Only then is the `.mov` final on disk (finalize
-    /// rewrites it in place). `@Sendable`: arrives on AVFoundation's completion queue or
-    /// writerQueue. Must be assigned BEFORE `start()`, which captures its current value.
+    /// Fired once the `.mov` is final (see `ScreenRecording`). `@Sendable`: arrives on AVFoundation's completion queue or writerQueue.
     var onFinalized: (@Sendable () -> Void)?
 
     /// Serial queue that confines all writer + SCK-callback state. Every field on
