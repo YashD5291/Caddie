@@ -8,13 +8,16 @@ import GRDB
 /// records audio only, with the reason on the non-fatal video channel.
 ///
 /// Free space comes from an injected provider, so no test depends on the developer's
-/// real free space. Video is a `MockScreenRecorder` (no TCC grant, no screen capture);
-/// audio is a real `AudioRecorder`, the same rig as the screen-capture suites.
+/// real free space, and video files live in a per-test temp directory, so no test
+/// touches the user's real media (D-15). Video is a `MockScreenRecorder` (no TCC grant,
+/// no screen capture); audio is a real `AudioRecorder`, the same rig as the
+/// screen-capture suites.
 @MainActor
 final class RecordingCoordinatorDiskGuardTests: XCTestCase {
     var db: AppDatabase!
     var pipeline: TranscriptionPipeline!
     var factory: MockScreenRecorderFactory!
+    var videoDir: URL!
 
     nonisolated private static let fourHundredMiB: Int64 = 419_430_400
     nonisolated private static let sixHundredMiB: Int64 = 629_145_600
@@ -24,10 +27,16 @@ final class RecordingCoordinatorDiskGuardTests: XCTestCase {
         db = try AppDatabase(inMemory: true)
         pipeline = TranscriptionPipeline(asr: MockASREngine(), diarization: MockDiarizationEngine())
         factory = MockScreenRecorderFactory()
+        videoDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: videoDir, withIntermediateDirectories: true)
     }
 
     override func tearDownWithError() throws {
-        db = nil; pipeline = nil; factory = nil
+        if let videoDir, FileManager.default.fileExists(atPath: videoDir.path) {
+            try FileManager.default.removeItem(at: videoDir)
+        }
+        db = nil; pipeline = nil; factory = nil; videoDir = nil
     }
 
     // MARK: - Helpers
@@ -44,7 +53,9 @@ final class RecordingCoordinatorDiskGuardTests: XCTestCase {
             audioDeviceManager: nil,
             liveTranscriber: nil,
             screenRecorderFactory: withVideo ? factory.factory : nil,
-            availableDiskSpace: capacity
+            availableDiskSpace: capacity,
+            videoInspector: MockVideoInspector(),
+            videoDirectory: videoDir
         )
     }
 

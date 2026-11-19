@@ -9,21 +9,30 @@ import GRDB
 /// Every recorder is a `MockScreenRecorder` vended by `MockScreenRecorderFactory`, so
 /// these tests need no TCC grant and never capture the developer's screen. Audio is a
 /// real `AudioRecorder` — the same pre-existing hardware dependency every other
-/// coordinator test suite carries.
+/// coordinator test suite carries. Free space, the video inspector, and the video
+/// directory are injected, so no test depends on the host's free space or touches the
+/// user's real media (D-15).
 @MainActor
 final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
     var db: AppDatabase!
     var pipeline: TranscriptionPipeline!
     var factory: MockScreenRecorderFactory!
+    var videoDir: URL!
 
     override func setUpWithError() throws {
         db = try AppDatabase(inMemory: true)
         pipeline = TranscriptionPipeline(asr: MockASREngine(), diarization: MockDiarizationEngine())
         factory = MockScreenRecorderFactory()
+        videoDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: videoDir, withIntermediateDirectories: true)
     }
 
     override func tearDownWithError() throws {
-        db = nil; pipeline = nil; factory = nil
+        if let videoDir, FileManager.default.fileExists(atPath: videoDir.path) {
+            try FileManager.default.removeItem(at: videoDir)
+        }
+        db = nil; pipeline = nil; factory = nil; videoDir = nil
     }
 
     // MARK: - Helpers
@@ -36,7 +45,10 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
             detector: MeetingDetector(),
             audioDeviceManager: nil,
             liveTranscriber: nil,
-            screenRecorderFactory: factory.factory
+            screenRecorderFactory: factory.factory,
+            availableDiskSpace: { Int64.max },
+            videoInspector: MockVideoInspector(),
+            videoDirectory: videoDir
         )
     }
 
@@ -100,7 +112,7 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
             XCTFail("Expected .recording state")
             return
         }
-        let expected = AudioFileManager.videoPath(for: meetingId)
+        let expected = AudioFileManager.videoPath(for: meetingId, in: videoDir)
         XCTAssertEqual(factory.latest?.startedURLs.last, expected,
                        "Engine must be started against the meeting's canonical .mov URL")
         XCTAssertEqual(expected.pathExtension, "mov")
