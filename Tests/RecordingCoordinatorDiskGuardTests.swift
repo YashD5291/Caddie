@@ -65,7 +65,6 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         await attach(log, to: coordinator)
 
         await coordinator.handle(.manualStart(title: "Low Disk"))
-        await settle()
 
         await assertInsufficientDiskSpace(coordinator, available: Self.fourHundredMiB)
         let rows = try await meetingRowCount()
@@ -78,7 +77,6 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         let coordinator = makeCoordinator(capacity: { Self.fourHundredMiB }, withVideo: false)
 
         await coordinator.handle(.manualStart(title: "Low Disk"))
-        await settle()
 
         await assertInsufficientDiskSpace(coordinator, available: Self.fourHundredMiB)
         let rows = try await meetingRowCount()
@@ -89,7 +87,6 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         let coordinator = makeCoordinator(capacity: { throw DiskReadError() }, withVideo: true)
 
         await coordinator.handle(.manualStart(title: "Read Failure"))
-        await settle()
 
         guard let error = await stateError(coordinator) else {
             let state = await coordinator.state
@@ -117,7 +114,6 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         )
 
         await coordinator.handle(.manualStart(title: "Unmeasurable Video Directory"))
-        await settle()
 
         let error = await stateError(coordinator)
         XCTAssertNotNil(error, "The capacity read must target the injected video directory")
@@ -130,7 +126,6 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         let coordinator = makeCoordinator(capacity: { nil }, withVideo: true)
 
         await coordinator.handle(.manualStart(title: "Unknown Capacity"))
-        await settle()
 
         await assertInsufficientDiskSpace(coordinator, available: 0)
         let rows = try await meetingRowCount()
@@ -145,7 +140,6 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         await attach(log, to: coordinator)
 
         await coordinator.handle(.manualStart(title: "Audio Only"))
-        await settle()
 
         guard let meetingId = await recordingMeetingId(coordinator) else {
             let state = await coordinator.state
@@ -170,7 +164,6 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         await attach(log, to: coordinator)
 
         await coordinator.handle(.manualStart(title: "Neutral Headline"))
-        await settle()
 
         let message = log.videoMessages.first ?? ""
         XCTAssertTrue(message.hasPrefix("Screen recording: "), "Expected the neutral headline, got: \(message)")
@@ -185,9 +178,10 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         await attach(log, to: coordinator)
 
         await coordinator.handle(.manualStart(title: "At Threshold"))
-        await settle()
 
-        XCTAssertEqual(factory.makeCallCount, 1, "Exactly the threshold is enough for video")
+        // Video starts in an unstructured task, so wait for the engine to be vended.
+        let started = await waitUntil { self.factory.makeCallCount == 1 }
+        XCTAssertTrue(started, "Exactly the threshold is enough for video")
         XCTAssertTrue(log.videoMessages.isEmpty, "No warning at the threshold: \(log.videoMessages)")
     }
 
@@ -197,7 +191,6 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         await attach(log, to: coordinator)
 
         await coordinator.handle(.manualStart(title: "Feature Off"))
-        await settle()
 
         let meetingId = await recordingMeetingId(coordinator)
         XCTAssertNotNil(meetingId, "Screen recording off: only the 500 MB floor applies (D-03)")
@@ -214,7 +207,6 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         await attach(log, to: coordinator)
 
         await coordinator.handle(.manualStart(title: "Ordering"))
-        await settle()
 
         let events = log.events
         let recordingIndex = events.firstIndex { event in
@@ -239,11 +231,9 @@ final class RecordingCoordinatorDiskGuardTests: CoordinatorTestCase {
         let coordinator = makeCoordinator(capacity: { try log.nextCapacity() }, withVideo: true)
 
         await coordinator.handle(.manualStart(title: "Blocked Attempt"))
-        await settle()
         XCTAssertEqual(log.providerCalls, 1, "A blocked start must read capacity once")
 
         await coordinator.handle(.manualStart(title: "Audio Only Attempt"))
-        await settle()
         XCTAssertEqual(log.providerCalls, 2, "An audio-only start must read capacity once")
         let meetingId = await recordingMeetingId(coordinator)
         XCTAssertNotNil(meetingId, "The second attempt must record")
