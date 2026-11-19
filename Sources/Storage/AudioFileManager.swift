@@ -38,11 +38,12 @@ enum AudioFileManager {
     /// Returns the video (.mov) file path for a given meeting ID.
     ///
     /// Canonical layout: the video sits beside the meeting's audio files so a single
-    /// meeting id maps to exactly one `.mov`. Phase 20 owns deletion — `deleteAudio(meetingId:)`
-    /// intentionally does NOT remove this file yet, so deleting a meeting between
-    /// Phases 19 and 20 leaves its video orphaned (documented transient limitation).
-    static func videoPath(for meetingId: String) -> URL {
-        audioDirectory.appendingPathComponent("\(meetingId).mov")
+    /// meeting id maps to exactly one `.mov`. `deleteMedia(meetingId:)` removes it together
+    /// with the meeting, and the launch sweep `cleanupOrphanedVideos` removes any `.mov`
+    /// left without a meeting row. `directory` exists so tests and the coordinator can
+    /// target a temp directory.
+    static func videoPath(for meetingId: String, in directory: URL = audioDirectory) -> URL {
+        directory.appendingPathComponent("\(meetingId).mov")
     }
 
     /// Compresses a WAV file to ALAC (.m4a) using ExtAudioFile API.
@@ -247,17 +248,38 @@ enum AudioFileManager {
         return contents.filter { $0.pathExtension.lowercased() == "wav" }
     }
 
-    /// Deletes both WAV and M4A files for a given meeting ID.
-    static func deleteAudio(meetingId: String) {
-        let fm = FileManager.default
-        let wav = wavPath(for: meetingId)
-        let m4a = alacPath(for: meetingId)
-        do { try fm.removeItem(at: wav) } catch {
-            logger.warning("Failed to delete WAV for \(meetingId): \(error.localizedDescription)")
+    // MARK: - Media Deletion
+
+    /// Deletes every media file (`.wav`, `.m4a`, `.mov`) for a meeting, by meeting id.
+    ///
+    /// Deletion is keyed on the id, not on the `video_file` column: Phase-19-era and
+    /// unverified videos have NULL there, so column-driven deletion would leak screen
+    /// recordings. A missing file is expected (the WAV is removed after ALAC conversion,
+    /// and audio-only meetings have no `.mov`), so it is never logged as a failure.
+    static func deleteMedia(meetingId: String, in directory: URL = audioDirectory) {
+        guard isSafeMeetingId(meetingId) else {
+            logger.error("Refusing to delete media for unsafe meeting id")
+            return
         }
-        do { try fm.removeItem(at: m4a) } catch {
-            logger.warning("Failed to delete M4A for \(meetingId): \(error.localizedDescription)")
+        for ext in ["wav", "m4a", "mov"] {
+            removeFileIfPresent(at: directory.appendingPathComponent("\(meetingId).\(ext)"))
         }
+    }
+
+    /// Removes a file, treating "no such file" as the expected outcome rather than a failure.
+    static func removeFileIfPresent(at url: URL) {
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            logger.debug("No \(url.lastPathComponent) to delete")
+        } catch {
+            logger.warning("Failed to delete \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
+
+    /// Rejects ids that could build a path outside the media directory.
+    private static func isSafeMeetingId(_ id: String) -> Bool {
+        !id.isEmpty && !id.contains("/") && !id.contains("..")
     }
 
     /// Returns total bytes used by all files in the audio directory.
