@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
 status: executing
-stopped_at: Completed 20-04-PLAN.md
-last_updated: "2026-11-19T13:48:21.487Z"
+stopped_at: Completed 20-05-PLAN.md
+last_updated: "2026-11-19T14:03:40.160Z"
 last_activity: 2026-11-19
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 17
-  completed_plans: 13
+  completed_plans: 14
   percent: 50
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 20 (Video Storage & Retention) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Status: Ready to execute
 Last activity: 2026-11-19
 
@@ -85,6 +85,8 @@ Recent decisions affecting current work:
 - [Phase 20]: 20-03: A missing path short-circuits to .missing before any AVFoundation load, so the caller can tell 'nothing to delete' from 'unreadable, delete it'; a non-finite duration reads as 0
 - [Phase 20]: 20-04: onFinalized fires inside the finishWriting completion and on the writer-not-writing early return, gated only by the existing finalizeOnQueue idempotency guard; stop() still does not await finishWriting (D-13 additive-only, 3 changed lines in the hardware-verified engine)
 - [Phase 20]: 20-04: MockScreenRecorder.stop() finalizes only after a successful start, mirroring the engine's stop() no-op without a running writer, so a 20-06 test can never pass on a finalize that production would not deliver
+- [Phase 20]: 20-05: The D-01 tier decision lives in the coordinator precondition (evaluateDiskSpace in executeStartRecording): one capacity read decides both tiers, and the video tier is gated on screenRecorderFactory != nil, the same inert-by-absence gate as startVideo
+- [Phase 20]: 20-05: The low-disk skip runs at the startVideo call site after audio has started, so the message lands after .recording; it never calls handle(.recordingFailed) and never touches state
 
 ### Pending Todos
 
@@ -119,11 +121,12 @@ Recent decisions affecting current work:
 | Phase 20 P02 | 7 min | 2 tasks | 5 files |
 | Phase 20 P03 | 6 min | 2 tasks | 3 files |
 | Phase 20 P04 | 8 min | 2 tasks | 5 files |
+| Phase 20 P05 | 9 min | 2 tasks | 3 files |
 
 ## Session Continuity
 
-Last session: 2026-11-19T13:48:21.480Z
+Last session: 2026-11-19T14:03:40.153Z
 Last activity: 2026-07-09
-Stopped at: Completed 20-04-PLAN.md
+Stopped at: Completed 20-05-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 18`
