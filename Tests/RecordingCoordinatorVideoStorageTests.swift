@@ -398,8 +398,11 @@ final class RecordingCoordinatorVideoStorageTests: XCTestCase {
 
     /// The finalize of meeting #1 lands after meeting #2 started. It must reconcile
     /// meeting #1's row only, and meeting #2 keeps its own link through its own finalize.
+    ///
+    /// Meeting #1's finalize is fired by hand once meeting #2 is linked, not by a timer,
+    /// so a slow host cannot reorder the two meetings.
     func testLateFinalizeAcrossSecondMeetingTargetsOwnRow() async throws {
-        factory.finalizeDelay = .milliseconds(800)
+        factory.neverFinalize = true
         let coordinator = makeCoordinator()
 
         guard let first = await startMeeting(coordinator, title: "Meeting One") else {
@@ -413,6 +416,7 @@ final class RecordingCoordinatorVideoStorageTests: XCTestCase {
         await coordinator.handle(.manualStop)
         await coordinator.handle(.transcriptionComplete(meetingId: first))
 
+        factory.neverFinalize = false
         guard let second = await startMeeting(coordinator, title: "Meeting Two") else {
             XCTFail("Expected the second meeting to be recording")
             return
@@ -421,7 +425,10 @@ final class RecordingCoordinatorVideoStorageTests: XCTestCase {
         let secondLinked = try await waitUntil { try await self.isLinked(second) }
         XCTAssertTrue(secondLinked, "Meeting #2 links its own video")
         XCTAssertEqual(inspector.inspectCallCount, 0,
-                       "Meeting #2 must have started before meeting #1's finalize landed")
+                       "Meeting #1's finalize has not been fired yet")
+
+        let firstEngine = try XCTUnwrap(factory.instances.first)
+        firstEngine.simulateFinalize()
 
         let firstUnlinked = try await waitUntil { try await self.isUnlinked(first) }
         XCTAssertTrue(firstUnlinked, "Meeting #1's late finalize must reconcile meeting #1's row")
