@@ -22,6 +22,8 @@ struct Meeting: Identifiable {
     var endTime: String?
     var durationSeconds: Int?
     var audioFile: String?
+    var videoFile: String?          // "<meetingId>.mov" — filename only, like audioFile; nil when no usable video
+    var videoStartOffset: Double?   // seconds from audio start to the first video frame (STOR-04 anchor); nil iff videoFile is nil
     var status: MeetingStatus
     var transcript: String?
     var error: String?
@@ -37,6 +39,8 @@ struct Meeting: Identifiable {
         endTime: String? = nil,
         durationSeconds: Int? = nil,
         audioFile: String? = nil,
+        videoFile: String? = nil,
+        videoStartOffset: Double? = nil,
         status: MeetingStatus = .recording,
         transcript: String? = nil,
         error: String? = nil,
@@ -51,6 +55,8 @@ struct Meeting: Identifiable {
         self.endTime = endTime
         self.durationSeconds = durationSeconds
         self.audioFile = audioFile
+        self.videoFile = videoFile
+        self.videoStartOffset = videoStartOffset
         self.status = status
         self.transcript = transcript
         self.error = error
@@ -71,6 +77,8 @@ extension Meeting: Codable {
         case endTime = "end_time"
         case durationSeconds = "duration_seconds"
         case audioFile = "audio_file"
+        case videoFile = "video_file"
+        case videoStartOffset = "video_start_offset"
         case status
         case transcript
         case error
