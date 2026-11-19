@@ -83,7 +83,7 @@ Every meeting must be reliably captured, transcribed, and retrievable — no sil
 
 **User context:** User joins meetings on a remote PC via Jump Desktop, with a Loopback virtual device routing that audio to the Mac; Caddie runs on the local Mac and captures from the selected input device.
 
-**Next milestone:** v3.0 Screen Recording (started 2026-07-09) — see Current Milestone above. Phase 18 (Screen Capture Engine) complete 2026-07-10: `ScreenRecorder` verified 10/10 must-haves incl. hardware checks (HEVC ~1.2 Mbps, window exclusion, kill-9 recovery, static-screen keepalive, host-clock anchor). Outstanding: kill-9 gate re-run on a macOS 14.2 machine before v3.0 ships.
+**Next milestone:** v3.0 Screen Recording (started 2026-07-09) — see Current Milestone above. Phase 18 (Screen Capture Engine) complete 2026-07-10: `ScreenRecorder` verified 10/10 must-haves incl. hardware checks (HEVC ~1.2 Mbps, window exclusion, kill-9 recovery, static-screen keepalive, host-clock anchor). Outstanding: kill-9 gate re-run on a macOS 14.2 machine before v3.0 ships. Phase 19 (Recording Lifecycle Integration) is complete: video starts and stops with each meeting and degrades to audio-only. Phase 20 (Video Storage & Retention) was completed 2026-11-20 and verified with 52/52 must-haves and a hardware gate on real data (435 tests). Each meeting's `.mov` is linked by `video_file` plus `video_start_offset` and deleted with the meeting. A launch sweep removes row-less videos, keeping any that still have audio beside them. The disk guard has two tiers: recording is blocked below 500 MB, and the meeting records audio only below the preset video threshold. Next: Phase 21 (Settings, Playback & Alignment), and a full UI redesign is queued.
 
 ## Context
 
@@ -133,4 +133,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-09 — v3.0 Screen Recording milestone started*
+*Last updated: 2026-11-20 — Phase 20 Video Storage & Retention complete*

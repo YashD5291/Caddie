@@ -37,6 +37,20 @@ actor RecordingCoordinator {
     /// defensive `deinit` finalize act as a second safety net for the file.
     private let screenRecorderFactory: ScreenRecorderFactory?
 
+    /// Reads the free space the disk guard decides on. A throw blocks the start with that
+    /// error; `nil` reads as 0 and blocks too, so an unknown capacity never passes.
+    typealias DiskSpaceProvider = @Sendable () throws -> Int64?
+
+    private let availableDiskSpace: DiskSpaceProvider
+
+    /// Judges each finalized `.mov` (D-07). The verdict decides whether the file and its
+    /// link are kept.
+    private let videoInspector: any VideoFileInspecting
+
+    /// Where each meeting's `.mov` is written, inspected, and deleted. Production uses the
+    /// audio directory; it is injectable so tests never touch the user's real media (D-15).
+    private let videoDirectory: URL
+
     // MARK: - Callbacks
 
     private var onStateChange: (@Sendable (RecordingState) -> Void)?
@@ -93,22 +107,21 @@ actor RecordingCoordinator {
         /// The engine writing this meeting's video, boxed so teardown can call it.
         ///
         /// nil ONLY while the start call is still in flight. The context is published
-        /// before `start()` so an early first frame has somewhere to land, but the engine
-        /// itself cannot be stored that early: under Swift 6 region isolation, writing the
+        /// before `start()` (see `startVideoInner`), but the engine itself cannot be
+        /// stored that early: under Swift 6 region isolation, writing the
         /// non-Sendable engine into actor state merges it into this actor's region, which
         /// makes the subsequent `await recorder.start(...)` an illegal cross-domain send.
         /// It is attached the instant start returns, and teardown joins
         /// `videoStartTask` first — so by the time anything needs it, it is non-nil.
         var recorder: CaptureEngineBox?
-        /// Mach host ticks sampled the instant audio capture started —
-        /// the audio half of the STOR-04 anchor pair.
-        let audioStartTicks: UInt64
-        /// Host ticks of the first written video frame, from `onFirstFrameHostTime`.
-        var firstFrameTicks: UInt64?
         /// Set when SCK reports the stream died mid-meeting. The context is deliberately
         /// KEPT so teardown still finalizes the partial (playable) file.
         var streamDied: Bool = false
     }
+
+    /// What one meeting's capture engine reports, in the order it happened. Fed by the
+    /// engine callbacks into that meeting's own stream (see `persistVideoLifecycle`).
+    private enum VideoEvent: Sendable { case firstFrame(UInt64), finalized }
 
     private var videoContext: VideoContext?
     private var videoStartTask: Task<Void, Never>?
@@ -124,7 +137,10 @@ actor RecordingCoordinator {
         detector: MeetingDetector,
         audioDeviceManager: AudioDeviceManager? = nil,
         liveTranscriber: LiveTranscriber? = nil,
-        screenRecorderFactory: ScreenRecorderFactory? = nil
+        screenRecorderFactory: ScreenRecorderFactory? = nil,
+        availableDiskSpace: DiskSpaceProvider? = nil,
+        videoInspector: any VideoFileInspecting = AVAssetVideoInspector(),
+        videoDirectory: URL = AudioFileManager.audioDirectory
     ) {
         self.database = database
         self.recorder = recorder
@@ -133,6 +149,13 @@ actor RecordingCoordinator {
         self.audioDeviceManager = audioDeviceManager
         self.liveTranscriber = liveTranscriber
         self.screenRecorderFactory = screenRecorderFactory
+        // The default measures the volume video is written to, so the video threshold is
+        // never checked against a different volume than the one being filled.
+        self.availableDiskSpace = availableDiskSpace ?? {
+            try RecordingCoordinator.systemAvailableDiskSpace(at: videoDirectory)
+        }
+        self.videoInspector = videoInspector
+        self.videoDirectory = videoDirectory
     }
 
     // MARK: - Public API
@@ -234,12 +257,6 @@ actor RecordingCoordinator {
         videoContext.map { !$0.streamDied } ?? false
     }
 
-    /// The STOR-04 anchor pair for the in-flight meeting: audio-start host ticks and
-    /// (once the first frame is written) the first-frame host ticks.
-    var videoAnchorPair: (audio: UInt64, firstFrame: UInt64?)? {
-        videoContext.map { ($0.audioStartTicks, $0.firstFrameTicks) }
-    }
-
     /// The `.mov` URL the in-flight capture is writing to.
     var videoOutputURL: URL? {
         videoContext?.outputURL
@@ -298,20 +315,83 @@ actor RecordingCoordinator {
 
     // MARK: - Precondition Checks
 
-    private static let minimumDiskSpaceBytes: Int64 = 500 * 1024 * 1024  // 500 MB
+    /// Outcome of the pre-start disk guard (STOR-03, reinterpreted by D-01).
+    ///
+    /// Only `.belowAudioFloor` blocks the recording. `.belowVideoThreshold` records
+    /// audio only: video is skipped and the reason goes to the non-fatal video channel,
+    /// because video headroom must never cost a meeting its audio.
+    enum DiskSpaceTier: Equatable, Sendable {
+        case belowAudioFloor
+        case belowVideoThreshold
+        case sufficient
+    }
 
-    private func checkDiskSpace() throws {
-        let resourceValues = try AudioFileManager.audioDirectory.resourceValues(
+    static let minimumDiskSpaceBytes: Int64 = 500 * 1024 * 1024  // 500 MB audio floor
+
+    /// D-02: video headroom covers about 2 h of video at the active preset's bitrate cap.
+    static let videoHeadroomSeconds: Int64 = 2 * 60 * 60
+
+    /// Free space needed before video may start: the audio floor plus `videoHeadroomSeconds`
+    /// of video at the preset's bitrate cap (D-02).
+    static func videoDiskThreshold(for preset: ScreenRecorder.QualityPreset) -> Int64 {
+        // Multiply in Int64 before dividing by 8 so no bits are truncated (Pitfall 7).
+        minimumDiskSpaceBytes + Int64(preset.bitrate) * videoHeadroomSeconds / 8
+    }
+
+    /// Pure two-tier decision over one capacity snapshot (D-01). A `nil` preset means
+    /// screen recording is off, so only the audio floor applies (D-03).
+    static func diskSpaceTier(available: Int64, videoPreset: ScreenRecorder.QualityPreset?) -> DiskSpaceTier {
+        guard available >= minimumDiskSpaceBytes else { return .belowAudioFloor }
+        guard let videoPreset else { return .sufficient }
+        return available >= videoDiskThreshold(for: videoPreset) ? .sufficient : .belowVideoThreshold
+    }
+
+    /// Menu bar headline for a capture that failed or stopped once the meeting began.
+    static let videoStoppedHeadline = "Screen recording stopped \u{2014} audio was saved"
+
+    /// Neutral menu bar headline for the low-disk skip (D-01): video never started and the
+    /// meeting is still recording, so "stopped" and "audio was saved" would both be wrong.
+    /// The full warning UX belongs to Phase 21.
+    static let videoSkippedHeadline = "Screen recording"
+
+    /// Copy for the low-disk video skip, surfaced under `videoSkippedHeadline`.
+    static func lowDiskVideoMessage(availableBytes: Int64, requiredBytes: Int64) -> String {
+        let free = ByteCountFormatter.string(fromByteCount: availableBytes, countStyle: .file)
+        let needed = ByteCountFormatter.string(fromByteCount: requiredBytes, countStyle: .file)
+        return "Not enough free disk space for video (\(free) free, \(needed) needed) — this meeting is recording audio only"
+    }
+
+    /// The preset used for capture AND for the video disk threshold. Phase 21's quality
+    /// picker changes this one place.
+    private static let videoPreset: ScreenRecorder.QualityPreset = .default
+
+    /// Default `DiskSpaceProvider`, bound to the video directory in `init`: that volume's
+    /// capacity for important usage, which counts purgeable space. In production the
+    /// video directory is the audio directory, so one read covers both tiers. A thrown
+    /// read propagates and a missing value passes through as `nil`.
+    static func systemAvailableDiskSpace(at directory: URL) throws -> Int64? {
+        try directory.resourceValues(
             forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+        ).volumeAvailableCapacityForImportantUsage
+    }
+
+    /// Reads capacity ONCE and decides both tiers from that snapshot. Throws only for
+    /// `.belowAudioFloor` (or a failed read); the video tier never fails the start (D-01).
+    /// The video tier applies only when screen recording is on, the same "inert by
+    /// absence" gate as `startVideo` (D-03).
+    private func evaluateDiskSpace() throws -> (tier: DiskSpaceTier, availableBytes: Int64) {
+        let availableBytes = try availableDiskSpace() ?? 0
+        let tier = Self.diskSpaceTier(
+            available: availableBytes,
+            videoPreset: screenRecorderFactory != nil ? Self.videoPreset : nil
         )
-        guard let available = resourceValues.volumeAvailableCapacityForImportantUsage,
-              available >= Self.minimumDiskSpaceBytes else {
-            let available = resourceValues.volumeAvailableCapacityForImportantUsage ?? 0
+        if tier == .belowAudioFloor {
             throw CoordinatorError.insufficientDiskSpace(
-                available: available,
+                available: availableBytes,
                 required: Self.minimumDiskSpaceBytes
             )
         }
+        return (tier, availableBytes)
     }
 
     // MARK: - Side Effect Execution
@@ -336,8 +416,9 @@ actor RecordingCoordinator {
     }
 
     private func executeStartRecording(meetingId: String, meeting: DetectedMeeting) async {
+        let diskCheck: (tier: DiskSpaceTier, availableBytes: Int64)
         do {
-            try checkDiskSpace()
+            diskCheck = try evaluateDiskSpace()
         } catch {
             logger.error("Disk space check failed: \(error.localizedDescription)")
             await handle(.recordingFailed(error))
@@ -410,8 +491,14 @@ actor RecordingCoordinator {
 
             // Video is subordinate to audio: it starts only once audio is genuinely
             // running, and nothing in the video path can precede, gate, or fail the
-            // audio start (VID-03 / VID-04).
-            startVideo(meetingId: meetingId, audioStartTicks: audioStartTicks)
+            // audio start (VID-03 / VID-04). Low disk skips video here, after audio is
+            // running and after `.recording` was published, so AppState's clear-on-
+            // recording cannot erase the message (Pitfall 3).
+            if diskCheck.tier == .belowVideoThreshold {
+                skipVideoForLowDisk(meetingId: meetingId, availableBytes: diskCheck.availableBytes)
+            } else {
+                startVideo(meetingId: meetingId, audioStartTicks: audioStartTicks)
+            }
 
             NotificationManager.recordingStarted(title: meeting.title)
             logger.info("Recording started for meeting \(meetingId)")
@@ -441,36 +528,54 @@ actor RecordingCoordinator {
         }
     }
 
+    /// Low-disk video skip (D-01): the meeting records audio only and the reason goes to
+    /// the non-fatal video channel. Never fails the recording and never touches `state`.
+    private func skipVideoForLowDisk(meetingId: String, availableBytes: Int64) {
+        let requiredBytes = Self.videoDiskThreshold(for: Self.videoPreset)
+        logger.warning("Skipping screen capture for \(meetingId): \(availableBytes) bytes free, \(requiredBytes) needed for video")
+        surfaceVideoError(Self.lowDiskVideoMessage(availableBytes: availableBytes, requiredBytes: requiredBytes),
+                          headline: Self.videoSkippedHeadline)
+    }
+
     private func startVideoInner(meetingId: String, audioStartTicks: UInt64) async {
         guard let screenRecorderFactory else { return }
 
         let recorder = screenRecorderFactory()
-        let url = AudioFileManager.videoPath(for: meetingId)
+        let url = AudioFileManager.videoPath(for: meetingId, in: videoDirectory)
 
-        // Both callbacks MUST be assigned BEFORE start(): the engine's WriterSink is
+        // One ordered event stream per meeting (D-05, D-06). The engine yields the first
+        // frame before it can finish writing, and AsyncStream keeps yield order, so the
+        // link always lands before the verdict.
+        let (events, continuation) = AsyncStream.makeStream(of: VideoEvent.self)
+
+        // All three callbacks MUST be assigned BEFORE start(): the engine's WriterSink is
         // constructed with the CURRENT values of these closures, so assigning after
-        // start() is a silent no-op — no anchor, and no mid-meeting death signal.
-        recorder.onFirstFrameHostTime = { [weak self] ticks in
-            Task { await self?.recordFirstFrameAnchor(ticks) }
+        // start() is a silent no-op — no anchor, no finalize signal, and no mid-meeting
+        // death signal.
+        recorder.onFirstFrameHostTime = { ticks in continuation.yield(.firstFrame(ticks)) }
+        recorder.onFinalized = {
+            continuation.yield(.finalized)
+            continuation.finish()
         }
         recorder.onStreamStopped = { [weak self] error in
             Task { await self?.handleVideoStreamStopped(error) }
         }
 
-        // Publish the context BEFORE starting, so a first frame delivered during the
-        // start call still finds somewhere to record its anchor.
+        persistVideoLifecycle(meetingId: meetingId, url: url, audioStartTicks: audioStartTicks, events: events)
+
+        // Publish the context BEFORE starting, so a stream death reported during the
+        // start call still finds the in-flight capture.
         videoContext = VideoContext(
             meetingId: meetingId,
             outputURL: url,
-            recorder: nil,
-            audioStartTicks: audioStartTicks
+            recorder: nil
         )
 
         do {
             // Phase 21 owns the user-facing target/preset choice; `.display(nil)` and
-            // `.balanced` are the interim defaults. Constructed at the call site, so the
-            // non-Sendable CaptureTarget is a disconnected region — no isolation problem.
-            try await recorder.start(target: .display(nil), preset: .balanced, outputURL: url)
+            // `Self.videoPreset` are the interim defaults. Constructed at the call site, so
+            // the non-Sendable CaptureTarget is a disconnected region — no isolation problem.
+            try await recorder.start(target: .display(nil), preset: Self.videoPreset, outputURL: url)
 
             guard videoContext?.meetingId == meetingId else {
                 // Teardown raced ahead of this start. 19-03 joins videoStartTask before
@@ -488,21 +593,179 @@ actor RecordingCoordinator {
             logger.error("Screen capture failed to start for \(meetingId): \(error.localizedDescription)")
             surfaceVideoError("Screen recording unavailable — audio is still recording: \(error.localizedDescription)")
             videoContext = nil
+            // D-05: a failed start leaves no link and no file. End this meeting's stream so
+            // its consumer exits, and remove any partial the failed start left behind (a
+            // missing file is the expected case).
+            continuation.finish()
+            AudioFileManager.removeFileIfPresent(at: url)
         }
     }
 
-    /// Video half of the STOR-04 anchor pair. Phase 20 persists this pair to the
-    /// meetings row; Phase 19 holds it in memory and logs the derived offset.
-    private func recordFirstFrameAnchor(_ ticks: UInt64) {
-        guard var ctx = videoContext else { return }
-        ctx.firstFrameTicks = ticks
-        videoContext = ctx
+    /// Seconds from the audio start to the first written video frame (STOR-04, D-08).
+    ///
+    /// Movie time 0 is the first frame (the writer session starts at its timestamp), so
+    /// Phase 21 maps transcript time t to video time `t - video_start_offset`.
+    static func videoStartOffset(audioStartTicks: UInt64, firstFrameTicks: UInt64, timebase: mach_timebase_info_data_t) -> Double {
+        ScreenRecorder.hostTicksToSeconds(firstFrameTicks, timebase: timebase)
+            - ScreenRecorder.hostTicksToSeconds(audioStartTicks, timebase: timebase)
+    }
 
+    private static func hostTimebase() -> mach_timebase_info_data_t {
         var timebase = mach_timebase_info_data_t()
         mach_timebase_info(&timebase)
-        let offset = ScreenRecorder.hostTicksToSeconds(ticks, timebase: timebase)
-                   - ScreenRecorder.hostTicksToSeconds(ctx.audioStartTicks, timebase: timebase)
-        logger.info("Video anchor for \(ctx.meetingId): audioTicks=\(ctx.audioStartTicks) firstFrameTicks=\(ticks) offset=\(offset, format: .fixed(precision: 3))s")
+        return timebase
+    }
+
+    /// Consumes one meeting's video events in order: link on the first frame, verify on
+    /// finalize (D-05 as amended). Ends when the engine finalizes or the start fails.
+    ///
+    /// Every handler takes this meeting's id and url explicitly and never reads the
+    /// in-flight context: a late finalize can land after teardown cleared it, or after
+    /// meeting #2 started, and must still reconcile its own row (D-06).
+    ///
+    /// The consuming task is deliberately neither stored nor awaited by teardown:
+    /// pipeline.enqueue must never wait on finalize or inspection. It holds the coordinator
+    /// weakly while it waits for the next event, so a stream that never finishes (quit, a
+    /// wedged finalize) pins only the task.
+    private func persistVideoLifecycle(meetingId: String, url: URL, audioStartTicks: UInt64,
+                                       events: AsyncStream<VideoEvent>) {
+        Task { [weak self] in
+            var linked = false
+            var offset: Double?
+            for await event in events {
+                guard let self else { return }
+                switch event {
+                case .firstFrame(let ticks):
+                    let firstFrameOffset = Self.videoStartOffset(audioStartTicks: audioStartTicks,
+                                                                 firstFrameTicks: ticks,
+                                                                 timebase: Self.hostTimebase())
+                    offset = firstFrameOffset
+                    self.logger.info("Video anchor for \(meetingId): audioTicks=\(audioStartTicks) firstFrameTicks=\(ticks) offset=\(firstFrameOffset, format: .fixed(precision: 3))s")
+                    linked = await self.linkVideo(meetingId: meetingId, fileName: url.lastPathComponent,
+                                                  offset: firstFrameOffset)
+                case .finalized:
+                    await self.reconcileFinalizedVideo(meetingId: meetingId, url: url, linked: linked, offset: offset)
+                }
+            }
+        }
+    }
+
+    /// Links the video and its anchor in one targeted write (D-05, D-08). Returns whether
+    /// the row was linked: false when the write fails or the meeting row no longer exists.
+    /// Never a full-record update, which could clobber other columns.
+    @discardableResult
+    private func linkVideo(meetingId: String, fileName: String, offset: Double?) async -> Bool {
+        do {
+            let changedRows = try await database.dbWriter.write { dbConn -> Int in
+                try dbConn.execute(
+                    sql: "UPDATE meetings SET video_file = ?, video_start_offset = ? WHERE meeting_id = ?",
+                    arguments: [fileName, offset, meetingId]
+                )
+                return dbConn.changesCount
+            }
+            guard changedRows > 0 else {
+                logger.warning("Meeting \(meetingId) no longer exists; video \(fileName) not linked")
+                return false
+            }
+            logger.info("Linked video \(fileName) to meeting \(meetingId)")
+            return true
+        } catch {
+            logger.error("Failed to link video \(fileName) to meeting \(meetingId): \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Clears both video columns. Returns whether the write succeeded.
+    @discardableResult
+    private func unlinkVideo(meetingId: String) async -> Bool {
+        do {
+            try await database.dbWriter.write { dbConn in
+                try dbConn.execute(
+                    sql: "UPDATE meetings SET video_file = NULL, video_start_offset = NULL WHERE meeting_id = ?",
+                    arguments: [meetingId]
+                )
+            }
+            return true
+        } catch {
+            logger.error("Failed to unlink video from meeting \(meetingId): \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Verifies the finished file, then keeps or discards it and its link (D-05, D-07).
+    ///
+    /// Runs only on the engine's finalize signal. Finalize rewrites the file in place,
+    /// so inspecting or deleting any earlier would judge, or destroy, a file mid-rewrite
+    /// (D-13).
+    ///
+    /// The meeting can be deleted before its finalize lands (Delete works at every status,
+    /// and `stop()` returns before `finishWriting`). Its file is then removed whatever the
+    /// verdict, because finalize may have written it back after `deleteMedia` ran.
+    private func reconcileFinalizedVideo(meetingId: String, url: URL, linked: Bool,
+                                         offset: Double?) async {
+        let result = await videoInspector.inspect(url)
+        if await isMeetingDeleted(meetingId) {
+            logger.warning("Meeting \(meetingId) was deleted before its video finalized; removing \(url.lastPathComponent)")
+            AudioFileManager.removeFileIfPresent(at: url)
+            return
+        }
+        switch result {
+        case .inspected(let inspection) where inspection.isUsable:
+            guard linked else {
+                await linkVideo(meetingId: meetingId, fileName: url.lastPathComponent, offset: offset)
+                return
+            }
+            // No second write: meetings_au re-indexes FTS on every UPDATE of the row.
+            logger.info("Video verified for \(meetingId): \(inspection.durationSeconds, format: .fixed(precision: 1))s, \(inspection.videoTrackCount) track(s)")
+        case .inspected(let inspection):
+            await discardUnusableVideo(
+                meetingId: meetingId, url: url, linked: linked,
+                reason: "playable=\(inspection.isPlayable) duration=\(inspection.durationSeconds)s videoTracks=\(inspection.videoTrackCount)"
+            )
+        case .unreadable(let reason):
+            await discardUnusableVideo(meetingId: meetingId, url: url, linked: linked, reason: reason)
+        case .inconclusive(let reason):
+            // Not a D-07 verdict: the probe failed for a reason unrelated to the content,
+            // so deleting could destroy a good recording.
+            logger.error("Could not verify finalized video \(url.lastPathComponent) for meeting \(meetingId); keeping the file and its link: \(reason)")
+        case .missing:
+            logger.warning("Finalized video \(url.lastPathComponent) for meeting \(meetingId) is missing from disk")
+            guard linked else { return }
+            await unlinkVideo(meetingId: meetingId)
+        }
+    }
+
+    /// True only when the read succeeds and finds no row. A failed read logs an error and
+    /// returns false, so it is never mistaken for a deleted meeting.
+    private func isMeetingDeleted(_ meetingId: String) async -> Bool {
+        do {
+            let rowCount = try await database.dbWriter.read { dbConn in
+                try Meeting.filter(Column("meeting_id") == meetingId).fetchCount(dbConn)
+            }
+            return rowCount == 0
+        } catch {
+            logger.error("Could not confirm meeting \(meetingId) still exists: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// D-07: a finalized `.mov` with no usable video has both columns cleared, then is
+    /// deleted. Unlinks first: if the unlink fails the file is kept, because a link to a
+    /// missing file is worse than an unusable file on disk. Logged, not surfaced: a late
+    /// finalize can land during a later meeting, where a message would be misattributed.
+    private func discardUnusableVideo(meetingId: String, url: URL, linked: Bool, reason: String) async {
+        if linked {
+            guard await unlinkVideo(meetingId: meetingId) else {
+                logger.error("Kept unusable video \(url.lastPathComponent) for meeting \(meetingId) because unlinking it failed: \(reason)")
+                return
+            }
+        }
+        AudioFileManager.removeFileIfPresent(at: url)
+        if linked {
+            logger.error("Unlinked and discarded unusable video \(url.lastPathComponent) for meeting \(meetingId): \(reason)")
+        } else {
+            logger.warning("Discarded unusable video \(url.lastPathComponent) for meeting \(meetingId), no frame was linked: \(reason)")
+        }
     }
 
     /// Authoritative mid-meeting death signal (window closed, SCK error -3821). The
@@ -612,12 +875,14 @@ actor RecordingCoordinator {
         }
     }
 
-    /// The single exit for every video failure. Logs and hands the message to the
-    /// dedicated non-fatal channel. Never throws, never touches `state`, never calls
-    /// `handle` — a degraded recording is still a working recording.
-    private func surfaceVideoError(_ message: String) {
-        logger.error("Video error surfaced: \(message)")
-        onVideoError?(message)
+    /// The single exit for every video failure. Logs and hands the full menu bar line,
+    /// headline included, to the dedicated non-fatal channel. Never throws, never touches
+    /// `state`, never calls `handle` — a degraded recording is still a working recording.
+    private func surfaceVideoError(_ message: String,
+                                   headline: String = RecordingCoordinator.videoStoppedHeadline) {
+        let line = "\(headline): \(message)"
+        logger.error("Video error surfaced: \(line)")
+        onVideoError?(line)
     }
 
     private func executeStopAndTranscribe(meetingId: String) async {

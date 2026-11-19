@@ -26,23 +26,24 @@ enum AudioFileManager {
     }
 
     /// Returns the WAV file path for a given meeting ID.
-    static func wavPath(for meetingId: String) -> URL {
-        audioDirectory.appendingPathComponent("\(meetingId).wav")
+    static func wavPath(for meetingId: String, in directory: URL = audioDirectory) -> URL {
+        directory.appendingPathComponent("\(meetingId).wav")
     }
 
     /// Returns the ALAC (.m4a) file path for a given meeting ID.
-    static func alacPath(for meetingId: String) -> URL {
-        audioDirectory.appendingPathComponent("\(meetingId).m4a")
+    static func alacPath(for meetingId: String, in directory: URL = audioDirectory) -> URL {
+        directory.appendingPathComponent("\(meetingId).m4a")
     }
 
     /// Returns the video (.mov) file path for a given meeting ID.
     ///
     /// Canonical layout: the video sits beside the meeting's audio files so a single
-    /// meeting id maps to exactly one `.mov`. Phase 20 owns deletion — `deleteAudio(meetingId:)`
-    /// intentionally does NOT remove this file yet, so deleting a meeting between
-    /// Phases 19 and 20 leaves its video orphaned (documented transient limitation).
-    static func videoPath(for meetingId: String) -> URL {
-        audioDirectory.appendingPathComponent("\(meetingId).mov")
+    /// meeting id maps to exactly one `.mov`. `deleteMedia(meetingId:)` removes it together
+    /// with the meeting, and the launch sweep `cleanupOrphanedVideos` removes any `.mov`
+    /// left without a meeting row. `directory` exists so tests and the coordinator can
+    /// target a temp directory.
+    static func videoPath(for meetingId: String, in directory: URL = audioDirectory) -> URL {
+        directory.appendingPathComponent("\(meetingId).mov")
     }
 
     /// Compresses a WAV file to ALAC (.m4a) using ExtAudioFile API.
@@ -247,17 +248,43 @@ enum AudioFileManager {
         return contents.filter { $0.pathExtension.lowercased() == "wav" }
     }
 
-    /// Deletes both WAV and M4A files for a given meeting ID.
-    static func deleteAudio(meetingId: String) {
-        let fm = FileManager.default
-        let wav = wavPath(for: meetingId)
-        let m4a = alacPath(for: meetingId)
-        do { try fm.removeItem(at: wav) } catch {
-            logger.warning("Failed to delete WAV for \(meetingId): \(error.localizedDescription)")
+    // MARK: - Media Deletion
+
+    /// Deletes every media file (`.wav`, `.m4a`, `.mov`) for a meeting, by meeting id.
+    ///
+    /// Deletion is keyed on the id, not on the `video_file` column: Phase-19-era and
+    /// unverified videos have NULL there, so column-driven deletion would leak screen
+    /// recordings. A missing file is expected (the WAV is removed after ALAC conversion,
+    /// and audio-only meetings have no `.mov`), so it is never logged as a failure.
+    static func deleteMedia(meetingId: String, in directory: URL = audioDirectory) {
+        guard isSafeMeetingId(meetingId) else {
+            logger.error("Refusing to delete media for unsafe meeting id")
+            return
         }
-        do { try fm.removeItem(at: m4a) } catch {
-            logger.warning("Failed to delete M4A for \(meetingId): \(error.localizedDescription)")
+        let mediaFiles = [
+            wavPath(for: meetingId, in: directory),
+            alacPath(for: meetingId, in: directory),
+            videoPath(for: meetingId, in: directory),
+        ]
+        for url in mediaFiles {
+            removeFileIfPresent(at: url)
         }
+    }
+
+    /// Removes a file, treating "no such file" as the expected outcome rather than a failure.
+    static func removeFileIfPresent(at url: URL) {
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            logger.debug("No \(url.lastPathComponent) to delete")
+        } catch {
+            logger.warning("Failed to delete \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
+
+    /// Rejects ids that could build a path outside the media directory.
+    private static func isSafeMeetingId(_ id: String) -> Bool {
+        !id.isEmpty && !id.contains("/") && !id.contains("..")
     }
 
     /// Returns total bytes used by all files in the audio directory.
@@ -307,6 +334,87 @@ enum AudioFileManager {
 
         if !orphans.isEmpty {
             logger.info("Cleaned up \(orphans.count) orphaned temp file(s)")
+        }
+    }
+
+    /// Deletes `.mov` files in `directory` whose meeting id has no row and no audio.
+    ///
+    /// Lists the files first and reads the ids second. `RecordingCoordinator` inserts the
+    /// meeting row before it starts audio or video, so every `.mov` that exists at listing
+    /// time already has its row and a later id read always contains it. Reading ids first
+    /// could delete the video of a recording that started in between.
+    ///
+    /// Skips the sweep entirely when the ids cannot be read (a failed read is not "no
+    /// meetings") and when the id set is empty while videos exist (a lost or recreated
+    /// database must never wipe every video). Must run before any recording can start.
+    ///
+    /// A row-less `.mov` is deleted only when it also has no sibling `.m4a` or `.wav`. A
+    /// real orphan never has audio: older versions deleted a meeting's audio and left its
+    /// video. A lost, recreated, or stale-restored database leaves the audio in place, so
+    /// that video is kept (D-14).
+    static func cleanupOrphanedVideos(in directory: URL = audioDirectory, knownMeetingIds: () throws -> Set<String>) {
+        let contents: [URL]
+        do {
+            contents = try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey]
+            )
+        } catch {
+            logger.warning("Skipping orphan video cleanup — cannot list \(directory.lastPathComponent): \(error.localizedDescription)")
+            return
+        }
+
+        let videos = contents.filter(isRegularMovFile)
+        guard !videos.isEmpty else { return }
+
+        let ids: Set<String>
+        do {
+            ids = try knownMeetingIds()
+        } catch {
+            logger.error("Skipping orphan video cleanup — could not read meetings: \(error.localizedDescription)")
+            return
+        }
+
+        guard !ids.isEmpty else {
+            logger.warning("Skipping orphan video cleanup — the meetings table is empty but \(videos.count) video file(s) exist; refusing to treat every video as an orphan")
+            return
+        }
+
+        let listedNames = Set(contents.map(\.lastPathComponent))
+        var removedCount = 0
+        for video in videos {
+            let stem = video.deletingPathExtension().lastPathComponent
+            guard !ids.contains(stem) else { continue }
+            guard !hasSiblingAudio(stem: stem, in: directory, listedNames: listedNames) else {
+                logger.warning("Keeping row-less video \(video.lastPathComponent): its audio still exists, so the database may be stale")
+                continue
+            }
+            logger.info("Removing orphaned video \(video.lastPathComponent)")
+            removeFileIfPresent(at: video)
+            removedCount += 1
+        }
+
+        if removedCount > 0 {
+            logger.info("Cleaned up \(removedCount) orphaned video file(s)")
+        }
+    }
+
+    /// True when the meeting's `.m4a` or `.wav` is among the names listed from `directory`.
+    private static func hasSiblingAudio(stem: String, in directory: URL, listedNames: Set<String>) -> Bool {
+        [alacPath(for: stem, in: directory), wavPath(for: stem, in: directory)].contains { url in
+            listedNames.contains(url.lastPathComponent)
+        }
+    }
+
+    /// True for a regular file with a `.mov` extension (any case). A file whose type
+    /// cannot be read is excluded: never delete what could not be classified.
+    private static func isRegularMovFile(_ url: URL) -> Bool {
+        guard url.pathExtension.lowercased() == "mov" else { return false }
+        do {
+            return try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
+        } catch {
+            logger.warning("Skipping \(url.lastPathComponent) in orphan video cleanup — cannot read file type: \(error.localizedDescription)")
+            return false
         }
     }
 

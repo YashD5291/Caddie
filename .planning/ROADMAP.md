@@ -25,7 +25,7 @@
 
 - [x] **Phase 18: Screen Capture Engine** - Standalone `ScreenRecorder` writes a crash-safe, bitrate-capped HEVC `.mov` with timing anchors (completed 2026-07-09)
 - [x] **Phase 19: Recording Lifecycle Integration** - Video starts/stops with the meeting and can never take down the audio recording (completed 2026-07-30)
-- [ ] **Phase 20: Video Storage & Retention** - Video files linked to meetings, deleted with them, and guarded against disk exhaustion
+- [x] **Phase 20: Video Storage & Retention** - Video files linked to meetings, deleted with them, and guarded against disk exhaustion (completed 2026-11-19)
 - [ ] **Phase 21: Settings, Playback & Alignment** - User controls, in-app AVKit playback, transcript-seek, and export
 
 ## Phase Details
@@ -76,15 +76,25 @@
 
 **Goal**: Video files are linked to their meeting, cleaned up on deletion, and guarded against disk exhaustion — no orphans, no FTS5 contamination.
 **Depends on**: Phase 19
-**Requirements**: STOR-01, STOR-02, STOR-03
+**Requirements**: STOR-01, STOR-02, STOR-03, STOR-04
 **Success Criteria** (what must be TRUE):
 
   1. A recorded meeting's row references its video via a nullable `video_file` column that is absent from the FTS5 index
   2. Deleting a meeting removes both its audio and video files from disk
-  3. Starting a recording is blocked pre-start when free disk space is below the raised video threshold (above the current 500 MB)
+  3. With screen recording enabled, starting a recording checks free space against a raised video threshold (500 MB + about 2 hours of video at the active preset): below 500 MB recording is blocked pre-start as before, and below the video threshold the video leg is blocked pre-start and the meeting records audio only, with the reason shown
   4. Meetings recorded audio-only leave `video_file` null with no storage side effects
+  5. A meeting with a usable video stores its video start offset (host-clock anchor) on its row, so playback position maps to transcript time (STOR-04 storage leg)
 
-**Plans**: TBD
+**Plans**: 8 plans
+
+- [x] 20-01-PLAN.md — v2 migration (`video_file`, `video_start_offset`) + `Meeting` fields; FTS isolation and upgrade tests (TDD)
+- [x] 20-02-PLAN.md — `deleteMedia` (wav/m4a/mov by id) + list-then-read launch orphan sweep with DB-error / empty-set guards (TDD)
+- [x] 20-03-PLAN.md — `VideoFileInspecting` contract + AVFoundation inspector + mock; synthetic-fixture tests (TDD)
+- [x] 20-04-PLAN.md — Additive engine `onFinalized` (exactly once, after `finishWriting`) + seam + mock knobs (TDD)
+- [x] 20-05-PLAN.md — Two-tier disk guard (block < 500 MB; audio-only below preset video threshold) + capacity seam (TDD)
+- [x] 20-06-PLAN.md — Per-meeting event funnel: link on first frame, verify/discard on finalize, every finalize path (TDD)
+- [x] 20-07-PLAN.md — README (D-12), "Storage used" label, STOR-03 wording + STOR-04 traceability in REQUIREMENTS/ROADMAP
+- [x] 20-08-PLAN.md — Hardware verification checkpoint (real migration, sweep, link + offset, quit partial, delete, kill-9)
 
 ### Phase 21: Settings, Playback & Alignment
 
@@ -114,5 +124,5 @@ Phases execute in numeric order: 18 → 19 → 20 → 21
 | 11–17. Calendar + Remote Recording | v2.0 | — | ✅ Complete | 2026-07-01 |
 | 18. Screen Capture Engine | v3.0 | 4/4 | Complete    | 2026-07-09 |
 | 19. Recording Lifecycle Integration | v3.0 | 5/5 | Complete    | 2026-07-30 |
-| 20. Video Storage & Retention | v3.0 | 0/TBD | Not started | - |
+| 20. Video Storage & Retention | v3.0 | 8/8 | Complete    | 2026-11-19 |
 | 21. Settings, Playback & Alignment | v3.0 | 0/TBD | Not started | - |

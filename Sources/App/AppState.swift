@@ -99,9 +99,11 @@ final class AppState {
                 calendarService = await startCalendarService()
             }
 
-            database = try AppDatabase()
+            let appDatabase = try AppDatabase()
+            database = appDatabase
             try AudioFileManager.ensureDirectoryExists()
             AudioFileManager.cleanupOrphanedTempFiles() // DATA-05
+            AudioFileManager.cleanupOrphanedVideos(knownMeetingIds: appDatabase.meetingIds) // STOR-02 / D-10: before the coordinator exists, so no capture is in flight
             SystemAudioCapture.cleanupStaleAggregateDevices() // REC-06
             audioDeviceManager.initialize() // AUD-01/AUD-02: enumerate devices and load persisted selection
 

@@ -5,8 +5,9 @@ import Foundation
 ///
 /// Deliberately NOT `Sendable`: like `ScreenRecorder` itself, a conformer is owned by
 /// exactly one isolation domain (the `RecordingCoordinator` actor) — the same ownership
-/// model `AudioRecorder` already has. The two callbacks are `@Sendable` because they are
-/// invoked from the engine's writer queue and SCK's own queue, not from the owner.
+/// model `AudioRecorder` already has. The three callbacks are `@Sendable` because they are
+/// invoked from the engine's writer queue, SCK's own queue, and AVFoundation's completion
+/// queue, not from the owner.
 protocol ScreenRecording: AnyObject {
     /// Fires once with the first written frame's host time (mach ticks) — the video half
     /// of the STOR-04 anchor pair. Must be assigned BEFORE `start`; the engine captures
@@ -16,6 +17,13 @@ protocol ScreenRecording: AnyObject {
     /// Fires if the stream dies mid-meeting (window closed, SCK error -3821). The
     /// authoritative death signal — `isRecording` still reads `true` after a stream error.
     var onStreamStopped: (@Sendable (Error?) -> Void)? { get set }
+
+    /// Fires exactly once when the file is final on disk: after `finishWriting` completes,
+    /// or immediately if the writer was not writing. `stop()` returns BEFORE this, because
+    /// finalize rewrites the file in place. Never fires when `start` throws. Must be
+    /// assigned BEFORE `start`; the engine captures its current value at start time, so a
+    /// later assignment is a silent no-op.
+    var onFinalized: (@Sendable () -> Void)? { get set }
 
     /// True while a stream is actively capturing.
     var isRecording: Bool { get }

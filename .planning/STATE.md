@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Screen Recording
-status: executing
-stopped_at: Completed 19-04-PLAN.md
-last_updated: "2026-07-30T20:49:13.179Z"
-last_activity: 2026-07-30
+status: ready_to_plan
+stopped_at: Phase 20 complete (8/8) — ready to discuss Phase 21
+last_updated: 2026-11-19T19:02:37.366Z
+last_activity: 2026-11-19
 progress:
   total_phases: 4
-  completed_phases: 2
-  total_plans: 9
-  completed_plans: 9
-  percent: 50
+  completed_phases: 3
+  total_plans: 17
+  completed_plans: 40
+  percent: 75
 ---
 
 # Project State
@@ -21,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-09)
 
 **Core value:** Every meeting must be reliably captured, transcribed, and retrievable -- no silent failures, no lost recordings, no data corruption.
-**Current focus:** Phase 19 — recording-lifecycle-integration
+**Current focus:** Phase 21 — settings, playback & alignment
 
 ## Current Position
 
-Phase: 20
+Phase: 21
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-07-30
+Status: Ready to plan
+Last activity: 2026-11-19
 
 ## Performance Metrics
 
 **Velocity (v1.0):**
 
-- Total plans completed: 28
+- Total plans completed: 36
 - Average duration: ~9 min
 - Total execution time: ~2.8 hours
 
@@ -77,6 +77,19 @@ Recent decisions affecting current work:
 - [Phase 19]: 19-04: Screen recording is inert by ABSENCE, not by flag — the ScreenRecorderFactory is constructed only inside the ScreenRecordingSettings.isEnabled branch, so no downstream path re-checks the gate
 - [Phase 19]: 19-04: Permissions.screenRecording is logged for diagnostics but never gates construction — it is a window-name inference, so a false negative would silently disable video; a denied TCC grant is handled as a real start() throw on the non-fatal channel
 - [Phase 19]: 19-04: The video warning renders in the .recording menu-bar branch too (not just .idle) — a capture that dies mid-meeting would otherwise be invisible for the rest of the meeting
+- [Phase 20]: 20-01: Video anchor persisted as a single video_start_offset DOUBLE (seconds, first video frame minus audio start; video time = transcript time - offset); raw host ticks not stored
+- [Phase 20]: 20-01: v2_add_video_columns is ADD COLUMN only; v1, meetings_fts and its triggers untouched, so video_file is never indexed (proven by negative search + exact FTS column-list test)
+- [Phase 20]: 20-02: Media deletion is keyed on meeting id, never on video_file, so Phase-19-era and unverified videos (NULL column) are still removed with their meeting
+- [Phase 20]: 20-02: The launch orphan sweep lists .mov regular files before reading meeting ids and skips entirely on an ID read failure or an empty meeting set; it runs synchronously in initialize() before RecordingCoordinator exists
+- [Phase 20]: 20-03: D-07 usability is a new production inspector (AVAssetVideoInspector) that copies the Phase 18 harness load core plus a video-track count; the DEBUG harness stays untouched so the kill-9 gate keeps its validated path
+- [Phase 20]: 20-03: A missing path short-circuits to .missing before any AVFoundation load, so the caller can tell 'nothing to delete' from 'unreadable, delete it'; a non-finite duration reads as 0
+- [Phase 20]: 20-04: onFinalized fires inside the finishWriting completion and on the writer-not-writing early return, gated only by the existing finalizeOnQueue idempotency guard; stop() still does not await finishWriting (D-13 additive-only, 3 changed lines in the hardware-verified engine)
+- [Phase 20]: 20-04: MockScreenRecorder.stop() finalizes only after a successful start, mirroring the engine's stop() no-op without a running writer, so a 20-06 test can never pass on a finalize that production would not deliver
+- [Phase 20]: 20-05: The D-01 tier decision lives in the coordinator precondition (evaluateDiskSpace in executeStartRecording): one capacity read decides both tiers, and the video tier is gated on screenRecorderFactory != nil, the same inert-by-absence gate as startVideo
+- [Phase 20]: 20-05: The low-disk skip runs at the startVideo call site after audio has started, so the message lands after .recording; it never calls handle(.recordingFailed) and never touches state
+- [Phase 20]: 20-06: Link early, verify on finalize through one AsyncStream per meeting; the consumer Task is unstructured and never awaited by teardown, so pipeline.enqueue never waits on finalize or inspection
+- [Phase 20]: 20-06: Finalize handlers take the captured meetingId/url and never read videoContext (a temporary mutation that keyed on videoContext failed the meeting #2 test); D-07 discards are logged, never surfaced, since a late finalize can land during a later meeting
+- [Phase 20]: 20-07: STOR-03 and STOR-04 keep [x]/Complete. Only their wording and traceability changed, because 20-05 and 20-06 shipped before this docs plan ran
 
 ### Pending Todos
 
@@ -107,11 +120,19 @@ Recent decisions affecting current work:
 | Phase 19 P02 | 13 min | 2 tasks | 2 files |
 | Phase 19 P03 | 16 min | 2 tasks | 2 files |
 | Phase 19 P04 | 12 min | 2 tasks | 4 files |
+| Phase 20 P01 | 7 min | 2 tasks | 4 files |
+| Phase 20 P02 | 7 min | 2 tasks | 5 files |
+| Phase 20 P03 | 6 min | 2 tasks | 3 files |
+| Phase 20 P04 | 8 min | 2 tasks | 5 files |
+| Phase 20 P05 | 9 min | 2 tasks | 3 files |
+| Phase 20 P06 | 16 min | 2 tasks | 2 files |
+| Phase 20 P07 | 4 min | 2 tasks | 4 files |
+| Phase 20 P08 | 25min | 2 tasks | 3 files |
 
 ## Session Continuity
 
-Last session: 2026-07-30T20:28:58.286Z
+Last session: 2026-11-19T17:44:47.817Z
 Last activity: 2026-07-09
-Stopped at: Completed 19-04-PLAN.md
+Stopped at: Completed 20-08-PLAN.md
 Resume file: None
 Next: `/gsd:plan-phase 18`

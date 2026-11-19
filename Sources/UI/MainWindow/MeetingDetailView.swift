@@ -296,7 +296,7 @@ struct MeetingDetailView: View {
             try db.dbWriter.write { dbConn in
                 _ = try Meeting.deleteOne(dbConn, id: meeting.id)
             }
-            AudioFileManager.deleteAudio(meetingId: meeting.meetingId)
+            AudioFileManager.deleteMedia(meetingId: meeting.meetingId)
         } catch {
             CaddieLogger.storage.error("Failed to delete meeting: \(error.localizedDescription)")
         }

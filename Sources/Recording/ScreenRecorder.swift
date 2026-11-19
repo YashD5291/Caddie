@@ -35,6 +35,9 @@ final class ScreenRecorder {
     /// Fired if the stream dies (`didStopWithError`). `@Sendable`: arrives on SCK's queue.
     var onStreamStopped: (@Sendable (Error?) -> Void)?
 
+    /// Fired once the `.mov` is final (see `ScreenRecording`). `@Sendable`: arrives on AVFoundation's completion queue or writerQueue.
+    var onFinalized: (@Sendable () -> Void)?
+
     /// Serial queue that confines all writer + SCK-callback state. Every field on
     /// `WriterSink` is touched ONLY on this queue — the documented invariant that
     /// justifies the sink's `@unchecked Sendable` conformance.
@@ -148,7 +151,8 @@ final class ScreenRecorder {
             videoInput: videoInput,
             queue: writerQueue,
             onFirstFrameHostTime: onFirstFrameHostTime,
-            onStreamStopped: onStreamStopped
+            onStreamStopped: onStreamStopped,
+            onFinalized: onFinalized
         )
         let stream = SCStream(filter: filter, configuration: config, delegate: sink)
         do {
@@ -443,6 +447,7 @@ final class WriterSink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked S
 
     private let onFirstFrameHostTime: (@Sendable (UInt64) -> Void)?
     private let onStreamStopped: (@Sendable (Error?) -> Void)?
+    private let onFinalized: (@Sendable () -> Void)?
 
     // writerQueue-confined operational state.
     private var state: ScreenRecorder.State = .recording
@@ -457,13 +462,15 @@ final class WriterSink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked S
         videoInput: AVAssetWriterInput,
         queue: DispatchQueue,
         onFirstFrameHostTime: (@Sendable (UInt64) -> Void)?,
-        onStreamStopped: (@Sendable (Error?) -> Void)?
+        onStreamStopped: (@Sendable (Error?) -> Void)?,
+        onFinalized: (@Sendable () -> Void)?
     ) {
         self.writer = writer
         self.videoInput = videoInput
         self.queue = queue
         self.onFirstFrameHostTime = onFirstFrameHostTime
         self.onStreamStopped = onStreamStopped
+        self.onFinalized = onFinalized
         super.init()
     }
 
@@ -574,15 +581,17 @@ final class WriterSink: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked S
 
         guard writer.status == .writing else {
             logger.warning("Finalize: writer not writing (status=\(self.writer.status.rawValue)); nothing to finish")
+            onFinalized?()
             return
         }
         videoInput.markAsFinished()
-        writer.finishWriting { [logger, writer] in
+        writer.finishWriting { [logger, writer, onFinalized] in
             if let error = writer.error {
                 logger.error("ScreenRecorder finishWriting error: \(error.localizedDescription)")
             } else {
                 logger.info("ScreenRecorder writer finalized (\(String(describing: reason)))")
             }
+            onFinalized?()
         }
     }
 

@@ -20,13 +20,132 @@ final class MigrationTests: XCTestCase {
         let expected = [
             "id", "meeting_id", "title", "app", "date", "start_time",
             "end_time", "duration_seconds", "audio_file", "status",
-            "transcript", "error", "created_at"
+            "transcript", "error", "created_at", "video_file", "video_start_offset"
         ]
 
-        XCTAssertEqual(columnNames.count, 13, "meetings table should have 13 columns")
+        XCTAssertEqual(columnNames.count, 15, "meetings table should have 15 columns")
         for name in expected {
             XCTAssertTrue(columnNames.contains(name), "Missing column: \(name)")
         }
+    }
+
+    func testVideoColumnsAreNullableWithNoDefault() throws {
+        let columns = try db.dbWriter.read { dbConn in
+            try Row.fetchAll(dbConn, sql: "PRAGMA table_info('meetings')")
+        }
+        let byName = Dictionary(uniqueKeysWithValues: columns.map { ($0["name"] as String, $0) })
+
+        let videoFile = try XCTUnwrap(byName["video_file"], "Missing column: video_file")
+        XCTAssertEqual(videoFile["type"] as String, "TEXT")
+        XCTAssertEqual(videoFile["notnull"] as Int, 0, "video_file must be nullable")
+        XCTAssertTrue((videoFile["dflt_value"] as DatabaseValue).isNull, "video_file must have no default")
+
+        let offset = try XCTUnwrap(byName["video_start_offset"], "Missing column: video_start_offset")
+        XCTAssertEqual(offset["type"] as String, "DOUBLE")
+        XCTAssertEqual(offset["notnull"] as Int, 0, "video_start_offset must be nullable")
+        XCTAssertTrue((offset["dflt_value"] as DatabaseValue).isNull, "video_start_offset must have no default")
+    }
+
+    func testMigrationsRegisteredInOrder() {
+        var migrator = DatabaseMigrator()
+        Migrations.run(&migrator)
+
+        XCTAssertEqual(migrator.migrations, ["v1_create_meetings", "v2_add_video_columns"])
+    }
+
+    // MARK: - Upgrade Path (STOR-01)
+
+    func testV1DatabaseUpgradesInPlaceAndStaysSearchable() throws {
+        let queue = try DatabaseQueue()
+        var migrator = DatabaseMigrator()
+        Migrations.run(&migrator)
+        try migrator.migrate(queue, upTo: "v1_create_meetings")
+
+        try queue.write { dbConn in
+            try dbConn.execute(sql: """
+                INSERT INTO meetings (meeting_id, title, date, start_time, status, transcript, created_at)
+                VALUES ('old-1', 'Quarterly Review', '2026-03-22', '2026-03-22T09:00:00Z', 'done', 'budget talk', '2026-03-22T09:00:00Z')
+                """)
+        }
+
+        try migrator.migrate(queue)
+
+        let row = try queue.read { dbConn in
+            try Row.fetchOne(dbConn, sql: "SELECT video_file, video_start_offset FROM meetings WHERE meeting_id = 'old-1'")
+        }
+        XCTAssertNotNil(row, "Pre-migration row must survive the upgrade")
+        XCTAssertNil(row?["video_file"] as String?)
+        XCTAssertNil(row?["video_start_offset"] as Double?)
+
+        let rowCount = try queue.read { dbConn in
+            try Int.fetchOne(dbConn, sql: "SELECT COUNT(*) FROM meetings")
+        }
+        XCTAssertEqual(rowCount, 1)
+
+        let hits = try queue.read { dbConn in
+            try Meeting.search("budget").fetchAll(dbConn)
+        }
+        XCTAssertEqual(hits.count, 1, "FTS must still find pre-migration rows")
+    }
+
+    // MARK: - FTS Isolation (STOR-01)
+
+    func testVideoFileIsNeverSearchable() throws {
+        try db.dbWriter.write { dbConn in
+            try dbConn.execute(sql: """
+                INSERT INTO meetings (meeting_id, title, date, start_time, status, created_at, video_file)
+                VALUES ('v-1', 'Standup', '2026-03-22', '2026-03-22T09:00:00Z', 'done', '2026-03-22T09:00:00Z', 'zqxjvideo.mov')
+                """)
+        }
+
+        let filenameHits = try db.dbWriter.read { dbConn in
+            try Meeting.search("zqxjvideo").fetchAll(dbConn)
+        }
+        XCTAssertTrue(filenameHits.isEmpty, "video_file must never be full-text searchable")
+
+        let titleHits = try db.dbWriter.read { dbConn in
+            try Meeting.search("Standup").fetchAll(dbConn)
+        }
+        XCTAssertEqual(titleHits.count, 1, "Positive control: the row itself is indexed")
+
+        let ftsColumns = try db.dbWriter.read { dbConn in
+            try Row.fetchAll(dbConn, sql: "PRAGMA table_info(meetings_fts)")
+        }.map { $0["name"] as String }
+        XCTAssertEqual(ftsColumns, ["title", "transcript", "app"])
+    }
+
+    func testVideoColumnUpdateKeepsFTSConsistent() throws {
+        try db.dbWriter.write { dbConn in
+            try dbConn.execute(sql: """
+                INSERT INTO meetings (meeting_id, title, date, start_time, status, transcript, created_at)
+                VALUES ('fts-video', 'Design', '2026-03-22', '2026-03-22T09:00:00Z', 'done', 'architecture review', '2026-03-22T09:00:00Z')
+                """)
+        }
+
+        try db.dbWriter.write { dbConn in
+            try dbConn.execute(sql: """
+                UPDATE meetings SET video_file = 'fts-video.mov', video_start_offset = 0.27 WHERE meeting_id = 'fts-video'
+                """)
+        }
+
+        let transcriptHits = try db.dbWriter.read { dbConn in
+            try Meeting.search("architecture").fetchAll(dbConn)
+        }
+        XCTAssertEqual(transcriptHits.count, 1, "Updating video columns must keep the row indexed")
+
+        let filenameHits = try db.dbWriter.read { dbConn in
+            try Meeting.search("fts-video.mov").fetchAll(dbConn)
+        }
+        XCTAssertEqual(filenameHits.count, 0, "The video filename must not become searchable")
+
+        try db.dbWriter.write { dbConn in
+            try dbConn.execute(sql: "DELETE FROM meetings WHERE meeting_id = 'fts-video'")
+        }
+
+        let afterDeleteHits = try db.dbWriter.read { dbConn in
+            try Meeting.search("architecture").fetchAll(dbConn)
+        }
+        XCTAssertEqual(afterDeleteHits.count, 0, "Deleting the row must remove it from the FTS index")
     }
 
     // MARK: - Constraints

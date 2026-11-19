@@ -8,60 +8,10 @@ import GRDB
 /// where a stop arrives while the video start task is still in flight, and the
 /// Pitfall 1 regression that meeting #2 in the same app session records again.
 ///
-/// Every recorder is a `MockScreenRecorder` vended by `MockScreenRecorderFactory`, so
-/// these tests need no TCC grant and never capture the developer's screen. Audio is a
-/// real `AudioRecorder` — the same pre-existing hardware dependency every other
-/// coordinator test suite carries.
-@MainActor
-final class RecordingCoordinatorScreenCaptureTeardownTests: XCTestCase {
-    var db: AppDatabase!
-    var pipeline: TranscriptionPipeline!
-    var factory: MockScreenRecorderFactory!
-
-    override func setUpWithError() throws {
-        db = try AppDatabase(inMemory: true)
-        pipeline = TranscriptionPipeline(asr: MockASREngine(), diarization: MockDiarizationEngine())
-        factory = MockScreenRecorderFactory()
-    }
-
-    override func tearDownWithError() throws {
-        db = nil; pipeline = nil; factory = nil
-    }
-
-    // MARK: - Helpers
-
-    private func makeCoordinator() -> RecordingCoordinator {
-        RecordingCoordinator(
-            database: db,
-            recorder: AudioRecorder(),
-            pipeline: pipeline,
-            detector: MeetingDetector(),
-            audioDeviceManager: nil,
-            liveTranscriber: nil,
-            screenRecorderFactory: factory.factory
-        )
-    }
-
-    /// Lets the unstructured video-start Task (and any callback hop) land.
-    private func settle() async {
-        try? await Task.sleep(for: .milliseconds(150))
-    }
-
-    /// The in-flight meeting id, or nil when the coordinator is not recording.
-    private func recordingMeetingId(_ coordinator: RecordingCoordinator) async -> String? {
-        let state = await coordinator.state
-        guard case .recording(let meetingId) = state else { return nil }
-        return meetingId
-    }
-
-    /// Start a meeting and wait for its video capture to be running.
-    @discardableResult
-    private func startMeeting(_ coordinator: RecordingCoordinator,
-                              title: String) async -> String? {
-        await coordinator.handle(.manualStart(title: title))
-        await settle()
-        return await recordingMeetingId(coordinator)
-    }
+/// The fixture (`CoordinatorTestCase`) vends `MockScreenRecorder`s and injects free space,
+/// the video inspector, and a temp video directory, so no test needs a TCC grant, depends
+/// on the host's free space, or touches the user's real media (D-15).
+final class RecordingCoordinatorScreenCaptureTeardownTests: CoordinatorTestCase {
 
     // MARK: - VID-03: Every teardown path finalizes the video
 
@@ -233,8 +183,10 @@ final class RecordingCoordinatorScreenCaptureTeardownTests: XCTestCase {
     /// "Processing…" forever — captured but never transcribed. The stop is bounded,
     /// the timeout is surfaced to the user, and transcription proceeds regardless.
     func testSlowVideoStopDoesNotBlockPipeline() async {
-        let collector = TeardownErrorCollector()
+        let collector = VideoErrorCollector()
         factory.stopDelay = .seconds(30)
+        // The abandoned 30 s stop outlives this test; it must not fire a finalize into a later one.
+        factory.neverFinalize = true
 
         let coordinator = makeCoordinator()
         await coordinator.setOnVideoError { collector.append($0) }
@@ -264,7 +216,7 @@ final class RecordingCoordinatorScreenCaptureTeardownTests: XCTestCase {
 
     /// The bounded stop must be invisible on the normal path: one stop, no error.
     func testNormalStopSurfacesNoVideoError() async {
-        let collector = TeardownErrorCollector()
+        let collector = VideoErrorCollector()
         let coordinator = makeCoordinator()
         await coordinator.setOnVideoError { collector.append($0) }
         await startMeeting(coordinator, title: "Clean Stop")
@@ -276,20 +228,4 @@ final class RecordingCoordinatorScreenCaptureTeardownTests: XCTestCase {
         XCTAssertTrue(collector.messages.isEmpty,
                       "A stop that completes normally must surface nothing, got: \(collector.messages)")
     }
-}
-
-// MARK: - Test Helpers
-
-/// Collects messages surfaced on the coordinator's video-error channel. The callback
-/// fires from the coordinator's actor while the test body reads from the test executor,
-/// so the buffer is lock-guarded (same rationale as `MockStreamingEngine`).
-private final class TeardownErrorCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _messages: [String] = []
-
-    func append(_ message: String) {
-        lock.withLock { _messages.append(message) }
-    }
-
-    var messages: [String] { lock.withLock { _messages } }
 }

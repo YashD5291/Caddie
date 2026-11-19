@@ -130,6 +130,70 @@ final class MeetingModelTests: XCTestCase {
         XCTAssertTrue(titles.contains("Design Review"))
     }
 
+    // MARK: - Video Fields (STOR-01 / STOR-04)
+
+    func testVideoFieldsDefaultToNil() throws {
+        var meeting = Meeting(
+            title: "Audio Only",
+            date: "2026-03-19",
+            startTime: "2026-03-19T09:00:00Z"
+        )
+        XCTAssertNil(meeting.videoFile)
+        XCTAssertNil(meeting.videoStartOffset)
+
+        try db.dbWriter.write { dbConn in
+            try meeting.insert(dbConn)
+        }
+
+        let fetched = try db.dbWriter.read { dbConn in
+            try Meeting.fetchOne(dbConn, key: meeting.id)
+        }
+        XCTAssertNotNil(fetched)
+        XCTAssertNil(fetched?.videoFile)
+        XCTAssertNil(fetched?.videoStartOffset)
+    }
+
+    func testVideoFieldsRoundTrip() throws {
+        var meeting = Meeting(
+            title: "Screen Share",
+            date: "2026-03-19",
+            startTime: "2026-03-19T10:00:00Z",
+            videoFile: "abc.mov",
+            videoStartOffset: 0.273
+        )
+
+        try db.dbWriter.write { dbConn in
+            try meeting.insert(dbConn)
+        }
+
+        let fetched = try db.dbWriter.read { dbConn in
+            try Meeting.fetchOne(dbConn, key: meeting.id)
+        }
+        XCTAssertEqual(fetched?.videoFile, "abc.mov")
+        let offset = try XCTUnwrap(fetched?.videoStartOffset)
+        XCTAssertEqual(offset, 0.273, accuracy: 1e-9)
+    }
+
+    func testSearchDecodesVideoFields() throws {
+        try db.dbWriter.write { dbConn in
+            var meeting = Meeting(
+                title: "Design Sync",
+                date: "2026-03-19",
+                startTime: "2026-03-19T11:00:00Z",
+                videoFile: "s.mov",
+                videoStartOffset: 1.5
+            )
+            try meeting.insert(dbConn)
+        }
+
+        let results = try db.dbWriter.read { dbConn in
+            try Meeting.search("Design").fetchAll(dbConn)
+        }
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(results.first?.videoFile, "s.mov")
+        XCTAssertEqual(results.first?.videoStartOffset, 1.5)
+    }
+
     // MARK: - MeetingStatus Enum
 
     func testMeetingStatusRawValues() {

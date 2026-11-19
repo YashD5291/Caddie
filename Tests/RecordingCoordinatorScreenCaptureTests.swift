@@ -4,67 +4,20 @@ import GRDB
 
 /// Verifies RecordingCoordinator wires screen capture into the recording lifecycle:
 /// a fresh engine per meeting, started only AFTER audio, writing to the meeting's
-/// canonical `.mov`, with the STOR-04 anchor pair held in memory (VID-03 start half).
+/// canonical `.mov` (VID-03 start half).
 ///
-/// Every recorder is a `MockScreenRecorder` vended by `MockScreenRecorderFactory`, so
-/// these tests need no TCC grant and never capture the developer's screen. Audio is a
-/// real `AudioRecorder` — the same pre-existing hardware dependency every other
-/// coordinator test suite carries.
-@MainActor
-final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
-    var db: AppDatabase!
-    var pipeline: TranscriptionPipeline!
-    var factory: MockScreenRecorderFactory!
+/// The fixture (`CoordinatorTestCase`) vends `MockScreenRecorder`s and injects free space,
+/// the video inspector, and a temp video directory, so no test needs a TCC grant, depends
+/// on the host's free space, or touches the user's real media (D-15).
+final class RecordingCoordinatorScreenCaptureTests: CoordinatorTestCase {
 
-    override func setUpWithError() throws {
-        db = try AppDatabase(inMemory: true)
-        pipeline = TranscriptionPipeline(asr: MockASREngine(), diarization: MockDiarizationEngine())
-        factory = MockScreenRecorderFactory()
-    }
-
-    override func tearDownWithError() throws {
-        db = nil; pipeline = nil; factory = nil
-    }
+    /// The menu bar headline for a capture that failed or stopped once the meeting began.
+    private static let stoppedHeadline = "Screen recording stopped \u{2014} audio was saved: "
 
     // MARK: - Helpers
 
-    private func makeCoordinator() -> RecordingCoordinator {
-        RecordingCoordinator(
-            database: db,
-            recorder: AudioRecorder(),
-            pipeline: pipeline,
-            detector: MeetingDetector(),
-            audioDeviceManager: nil,
-            liveTranscriber: nil,
-            screenRecorderFactory: factory.factory
-        )
-    }
-
-    private func makeCoordinatorWithoutVideo() -> RecordingCoordinator {
-        RecordingCoordinator(
-            database: db,
-            recorder: AudioRecorder(),
-            pipeline: pipeline,
-            detector: MeetingDetector(),
-            audioDeviceManager: nil,
-            liveTranscriber: nil
-        )
-    }
-
     private func makeMeeting() -> DetectedMeeting {
         DetectedMeeting(app: "Zoom", title: "Standup", processId: nil)
-    }
-
-    /// The in-flight meeting id, or nil when the coordinator is not recording.
-    private func recordingMeetingId(_ coordinator: RecordingCoordinator) async -> String? {
-        let state = await coordinator.state
-        guard case .recording(let meetingId) = state else { return nil }
-        return meetingId
-    }
-
-    /// Lets the unstructured video-start Task (and any callback hop) land.
-    private func settle() async {
-        try? await Task.sleep(for: .milliseconds(150))
     }
 
     // MARK: - VID-03: Start Path
@@ -100,7 +53,7 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
             XCTFail("Expected .recording state")
             return
         }
-        let expected = AudioFileManager.videoPath(for: meetingId)
+        let expected = AudioFileManager.videoPath(for: meetingId, in: videoDir)
         XCTAssertEqual(factory.latest?.startedURLs.last, expected,
                        "Engine must be started against the meeting's canonical .mov URL")
         XCTAssertEqual(expected.pathExtension, "mov")
@@ -112,7 +65,7 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
     /// With no factory injected (feature off), recording behaves exactly as before:
     /// the coordinator reaches .recording and no video code runs.
     func testRecordingWorksWithoutScreenRecorder() async {
-        let coordinator = makeCoordinatorWithoutVideo()
+        let coordinator = makeCoordinator(withVideo: false)
         await coordinator.handle(.manualStart(title: "No Video"))
         await settle()
 
@@ -124,23 +77,6 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
         XCTAssertEqual(factory.makeCallCount, 0, "No engine may be vended when the feature is off")
         let active = await coordinator.isVideoActive
         XCTAssertFalse(active, "Video must be inactive when no factory is injected")
-    }
-
-    /// STOR-04 (in-memory leg): both halves of the anchor pair are held for the
-    /// in-flight meeting — the audio-start host tick and the first-frame host tick.
-    /// The first-frame half also proves the callbacks were assigned BEFORE start().
-    func testAnchorPairCapturedInMemory() async {
-        let coordinator = makeCoordinator()
-        await coordinator.handle(.manualStart(title: "Anchor Test"))
-        await settle()
-
-        guard let pair = await coordinator.videoAnchorPair else {
-            XCTFail("Expected an anchor pair for the in-flight meeting")
-            return
-        }
-        XCTAssertGreaterThan(pair.audio, 0, "Audio-start host ticks must be recorded")
-        XCTAssertNotNil(pair.firstFrame,
-                        "First-frame ticks must arrive — proves onFirstFrameHostTime was set before start()")
     }
 
     /// While a meeting records with a healthy stream, video reports active.
@@ -158,7 +94,7 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
     /// A start throw (the shape a denied TCC grant takes) degrades the meeting to
     /// audio-only: still .recording, still recording in the DB, message surfaced once.
     func testVideoStartFailureDegradesToAudioOnly() async throws {
-        let collector = ErrorCollector()
+        let collector = VideoErrorCollector()
         factory.startError = MockScreenRecorderError(message: "TCC denied")
 
         let coordinator = makeCoordinator()
@@ -171,14 +107,14 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
             return
         }
 
-        let meeting = try await db.dbWriter.read { dbConn in
-            try Meeting.filter(Column("meeting_id") == meetingId).fetchOne(dbConn)
-        }
+        let meeting = try await fetchMeeting(meetingId)
         XCTAssertEqual(meeting?.status, .recording, "The audio recording must carry on untouched")
 
         XCTAssertEqual(collector.messages.count, 1, "The failure must be surfaced exactly once")
         XCTAssertTrue(collector.messages.first?.contains("TCC denied") == true,
                       "Surfaced copy must carry the underlying error, got: \(collector.messages)")
+        XCTAssertTrue(collector.messages.first?.hasPrefix(Self.stoppedHeadline) == true,
+                      "The menu bar line keeps its existing headline, got: \(collector.messages)")
         let active = await coordinator.isVideoActive
         XCTAssertFalse(active, "Video must be inactive after a start failure")
     }
@@ -204,7 +140,7 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
     /// A mid-meeting stream death (SCK -3821 / window closed) surfaces a message and
     /// leaves the audio recording running to normal completion.
     func testStreamDeathMidMeetingSurfacesAndKeepsAudio() async {
-        let collector = ErrorCollector()
+        let collector = VideoErrorCollector()
         let coordinator = makeCoordinator()
         await coordinator.setOnVideoError { collector.append($0) }
         await coordinator.handle(.manualStart(title: "Death Test"))
@@ -216,6 +152,8 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
         XCTAssertEqual(collector.messages.count, 1, "Stream death must be surfaced exactly once")
         XCTAssertTrue(collector.messages.first?.contains("-3821") == true,
                       "Surfaced copy must carry the SCK detail, got: \(collector.messages)")
+        XCTAssertTrue(collector.messages.first?.hasPrefix(Self.stoppedHeadline) == true,
+                      "The menu bar line keeps its existing headline, got: \(collector.messages)")
 
         let state = await coordinator.state
         guard case .recording = state else {
@@ -267,20 +205,4 @@ final class RecordingCoordinatorScreenCaptureTests: XCTestCase {
             return
         }
     }
-}
-
-// MARK: - Test Helpers
-
-/// Collects messages surfaced on the coordinator's video-error channel. The callback
-/// fires from the coordinator's actor while the test body reads from the test executor,
-/// so the buffer is lock-guarded (same rationale as `MockStreamingEngine`).
-private final class ErrorCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _messages: [String] = []
-
-    func append(_ message: String) {
-        lock.withLock { _messages.append(message) }
-    }
-
-    var messages: [String] { lock.withLock { _messages } }
 }

@@ -34,6 +34,16 @@ struct AppDatabase {
         try Self.migrate(dbWriter)
     }
 
+    /// Returns the `meeting_id` of every meeting row.
+    ///
+    /// Throws on any read failure. Callers that delete files based on this set must treat
+    /// a throw as "unknown", never as "no meetings".
+    func meetingIds() throws -> Set<String> {
+        try dbWriter.read { dbConn in
+            try String.fetchSet(dbConn, sql: "SELECT meeting_id FROM meetings")
+        }
+    }
+
     /// Runs all registered migrations.
     static func migrate(_ writer: any DatabaseWriter) throws {
         var migrator = DatabaseMigrator()

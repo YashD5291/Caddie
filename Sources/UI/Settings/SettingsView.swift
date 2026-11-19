@@ -193,7 +193,7 @@ struct SettingsView: View {
     private var storageSection: some View {
         Section("Storage") {
             HStack {
-                Text("Audio storage used")
+                Text("Storage used")
                 Spacer()
                 Text(storageUsed).foregroundStyle(.secondary)
             }
