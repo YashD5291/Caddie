@@ -9,6 +9,7 @@ import ScreenCaptureKit
 final class WriterSinkFinalizeTests: XCTestCase {
 
     private var tempDir: URL!
+    private let writerQueue = DispatchQueue(label: "test.writer")
 
     override func setUpWithError() throws {
         tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -32,7 +33,7 @@ final class WriterSinkFinalizeTests: XCTestCase {
 
         await fulfillment(of: [finalized], timeout: 5)
         XCTAssertNotEqual(writer.status, .writing, "onFinalized must arrive only after finishWriting completed")
-        try await Task.sleep(for: .milliseconds(300))
+        await drainWriterQueue()
         XCTAssertEqual(log.count, 1)
     }
 
@@ -46,7 +47,7 @@ final class WriterSinkFinalizeTests: XCTestCase {
         sink.finalize(reason: .streamError)
 
         await fulfillment(of: [finalized], timeout: 5)
-        try await Task.sleep(for: .milliseconds(300))
+        await drainWriterQueue()
         XCTAssertEqual(log.count, 1)
     }
 
@@ -64,7 +65,7 @@ final class WriterSinkFinalizeTests: XCTestCase {
         sink.finalize(reason: .streamError)
 
         await fulfillment(of: [finalized], timeout: 5)
-        try await Task.sleep(for: .milliseconds(300))
+        await drainWriterQueue()
         XCTAssertEqual(log.count, 1)
     }
 
@@ -79,17 +80,16 @@ final class WriterSinkFinalizeTests: XCTestCase {
         sink.finalize(reason: .stopped)
 
         await fulfillment(of: [finalized], timeout: 5)
-        try await Task.sleep(for: .milliseconds(300))
+        await drainWriterQueue()
         XCTAssertEqual(log.count, 1, "The not-writing early return must still release a waiter")
     }
 
     func testNilOnFinalizedIsSafe() async throws {
         let (writer, input) = try makeWriter(startWriting: true)
-        let queue = DispatchQueue(label: "test.writer")
         let sink = WriterSink(
             writer: writer,
             videoInput: input,
-            queue: queue,
+            queue: writerQueue,
             onFirstFrameHostTime: nil,
             onStreamStopped: nil,
             onFinalized: nil
@@ -97,10 +97,8 @@ final class WriterSinkFinalizeTests: XCTestCase {
 
         sink.finalize(reason: .stopped)
 
-        // Drain the confining queue so finalizeOnQueue has run before the test ends.
-        let drained = expectation(description: "writer queue drained")
-        queue.async { drained.fulfill() }
-        await fulfillment(of: [drained], timeout: 5)
+        // finalizeOnQueue must run before the test ends.
+        await drainWriterQueue()
     }
 
     // MARK: - Helpers
@@ -124,6 +122,14 @@ final class WriterSinkFinalizeTests: XCTestCase {
         return (writer, input)
     }
 
+    /// Waits for every finalize pass already queued on the sink's confining queue, so a
+    /// repeat fire from a second pass lands before the count is read.
+    private func drainWriterQueue() async {
+        let drained = expectation(description: "writer queue drained")
+        writerQueue.async { drained.fulfill() }
+        await fulfillment(of: [drained], timeout: 5)
+    }
+
     private func makeSink(writer: AVAssetWriter,
                           input: AVAssetWriterInput,
                           log: FinalizeLog,
@@ -131,7 +137,7 @@ final class WriterSinkFinalizeTests: XCTestCase {
         WriterSink(
             writer: writer,
             videoInput: input,
-            queue: DispatchQueue(label: "test.writer"),
+            queue: writerQueue,
             onFirstFrameHostTime: nil,
             onStreamStopped: nil,
             onFinalized: {

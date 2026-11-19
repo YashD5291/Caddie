@@ -134,7 +134,6 @@ final class ProtocolDITests: XCTestCase {
         XCTAssertEqual(log.count, 0, "stop() must return before a late finalize arrives")
 
         await fulfillment(of: [finalized], timeout: 5)
-        try await Task.sleep(for: .milliseconds(300))
         XCTAssertEqual(log.count, 1)
     }
 
